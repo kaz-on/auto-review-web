@@ -259,18 +259,20 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> ReviewResult
 
 
 def post_review(pr: ParsedPR, stdout_path: Path, progress: ProgressFn | None = None) -> None:
-    """レビュー結果を PR にコメントとして投稿する (gh pr review --comment)。"""
+    """レビュー結果を PR にコメントとして投稿する (gh pr review --comment)。
+
+    -R でリポジトリを明示するため、作業ディレクトリの git 状態には依存しない
+    (別のレビューが実行中でも安全に投稿できる)。
+    """
     progress = progress or (lambda _msg: None)
     if not Path(stdout_path).exists():
         raise ReviewError(f"レビューログが見つかりません: {stdout_path}")
 
-    repo_path = config.WORK_PATH / pr.repo
-    cwd = repo_path if repo_path.exists() else None
     progress(f"PR #{pr.number} にレビューを投稿します...")
     _run(
         [config.GH_BIN, "pr", "review", str(pr.number), "--comment",
+         "-R", f"{pr.owner}/{pr.repo}",
          "--body-file", str(stdout_path)],
-        cwd=cwd,
         progress=progress,
     )
     progress("投稿が完了しました。")
