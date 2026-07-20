@@ -78,6 +78,12 @@ class ReviewWorker:
             stderr_path=str(result.stderr_path),
         )
 
+        # 自動投稿が有効ならそのまま PR に投稿する (ワーカースレッド内で直列に実行)。
+        if job.auto_post:
+            self._store.update(job_id, posting=True)
+            progress("自動投稿が有効です。")
+            self._post(job_id)
+
     # --- 投稿 (非同期) -------------------------------------------------------
     def post_async(self, job_id: str) -> None:
         threading.Thread(target=self._post, args=(job_id,), daemon=True).start()

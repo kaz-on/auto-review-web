@@ -76,6 +76,17 @@ button:hover { filter: brightness(1.05); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.secondary { background: #e7ebf0; color: var(--text); }
 
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 400;
+  font-size: 0.88rem;
+  margin: 0.7rem 0 0;
+  cursor: pointer;
+}
+label.checkbox input { cursor: pointer; }
+
 .form-message { margin: 0.6rem 0 0; font-size: 0.88rem; min-height: 1.2em; }
 .form-message.error { color: var(--fail); white-space: pre-wrap; }
 .form-message.ok { color: var(--ok); }
@@ -101,6 +112,21 @@ button.secondary { background: #e7ebf0; color: var(--text); }
   padding: 0.8rem 1rem;
 }
 .job-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.job-head .spacer { flex: 1; }
+.chip {
+  font-size: 0.72rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  background: #e7ebf0;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.del-btn {
+  padding: 0.05rem 0.5rem;
+  font-size: 1rem;
+  line-height: 1.2;
+  border-radius: 6px;
+}
 .job-title { font-weight: 600; }
 .job-title a { color: var(--accent); text-decoration: none; }
 .job-sub { color: var(--muted); font-size: 0.82rem; }

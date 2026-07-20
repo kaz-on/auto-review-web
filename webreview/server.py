@@ -56,8 +56,12 @@ def create_app() -> Flask:
         except ReviewError as e:
             return jsonify({"error": str(e)}), 400
 
+        auto_post = bool(body.get("auto_post", True))
         was_busy = store.has_active()
-        job = store.create(url=pr.url, owner=pr.owner, repo=pr.repo, number=pr.number)
+        job = store.create(
+            url=pr.url, owner=pr.owner, repo=pr.repo, number=pr.number,
+            auto_post=auto_post,
+        )
         worker.enqueue(job.id)
         return jsonify({"job": _job_public(job), "was_busy": was_busy}), 201
 
@@ -80,6 +84,15 @@ def create_app() -> Flask:
                 encoding="utf-8", errors="replace"
             )
         return jsonify(data)
+
+    @app.delete("/api/reviews/<job_id>")
+    def delete_review(job_id: str):
+        job = store.get(job_id)
+        if job is None:
+            return jsonify({"error": "ジョブが見つかりません。"}), 404
+        if not store.delete(job_id):
+            return jsonify({"error": "実行中・待機中のジョブは削除できません。"}), 400
+        return jsonify({"ok": True})
 
     @app.post("/api/reviews/<job_id>/post")
     def post_review_endpoint(job_id: str):

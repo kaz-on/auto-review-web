@@ -57,6 +57,7 @@ fetchJSON("/api/config").then((cfg) => {
 // ---- レビュー投入フォーム --------------------------------------------------
 const form = document.getElementById("review-form");
 const urlInput = document.getElementById("pr-url");
+const autoPostInput = document.getElementById("auto-post");
 const submitBtn = document.getElementById("submit-btn");
 const formMessage = document.getElementById("form-message");
 
@@ -69,7 +70,7 @@ form.addEventListener("submit", async (e) => {
     const data = await fetchJSON("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: urlInput.value }),
+      body: JSON.stringify({ url: urlInput.value, auto_post: autoPostInput.checked }),
     });
     formMessage.classList.add("ok");
     formMessage.textContent = data.was_busy
@@ -94,7 +95,14 @@ const cards = new Map(); // jobId -> { root, refs, loadedResult }
 function buildCard(job) {
   const badge = el("span", { class: "badge" });
   const title = el("span", { class: "job-title" });
-  const head = el("div", { class: "job-head" }, [badge, title]);
+  const autopost = el("span", { class: "chip hidden", text: "自動投稿" });
+  const delBtn = el("button", {
+    class: "del-btn secondary hidden", text: "×",
+    attrs: { title: "履歴から削除", type: "button" },
+  });
+  delBtn.addEventListener("click", () => doDelete(job.id));
+  const head = el("div", { class: "job-head" },
+    [badge, title, autopost, el("span", { class: "spacer" }), delBtn]);
   const sub = el("div", { class: "job-sub" });
   const current = el("div", { class: "job-sub" });
   const errorBox = el("div", { class: "error-box hidden" });
@@ -109,7 +117,10 @@ function buildCard(job) {
   const root = el("div", { class: "job" },
     [head, sub, current, errorBox, actions, progressDetails]);
 
-  const refs = { badge, title, sub, current, errorBox, actions, progressPre, progressDetails };
+  const refs = {
+    badge, title, autopost, delBtn, sub, current, errorBox,
+    actions, progressPre, progressDetails,
+  };
   return { root, refs, loadedResult: false };
 }
 
@@ -122,6 +133,11 @@ function updateCard(card, job) {
   r.badge.textContent = "";
   if (spinning) r.badge.appendChild(el("span", { class: "spinner" }));
   r.badge.appendChild(document.createTextNode(STATUS_LABEL[job.status] || job.status));
+
+  // 自動投稿チップ / 削除ボタン
+  r.autopost.classList.toggle("hidden", !job.auto_post);
+  const terminal = job.status === "succeeded" || job.status === "failed";
+  r.delBtn.classList.toggle("hidden", !terminal);
 
   // タイトル (リンク)
   r.title.textContent = "";
@@ -226,6 +242,16 @@ function updateActions(card, job) {
   }
 }
 
+async function doDelete(jobId) {
+  if (!confirm("このレビューを履歴から削除しますか?（ログファイルは残ります）")) return;
+  try {
+    await fetchJSON(`/api/reviews/${jobId}`, { method: "DELETE" });
+    await refreshJobs();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
 async function doPost(jobId, card) {
   const btn = card.refs.postBtn;
   btn.disabled = true;
@@ -310,9 +336,14 @@ function renderSummary(entries) {
       }),
     ]);
     const meta = el("div", { class: "meta", text: `${e.mtime}（rev-${e.rev}）` });
-    const reviewPre = el("pre", { class: "code", text: e.review_text });
 
-    const children = [heading, meta, reviewPre];
+    // 一覧性を優先し、レビュー結果は折りたたんで表示する。
+    const reviewDetails = el("details", {}, [
+      el("summary", { text: "レビュー結果を表示" }),
+      el("pre", { class: "code", text: e.review_text }),
+    ]);
+
+    const children = [heading, meta, reviewDetails];
     if (e.details) {
       children.push(el("details", {}, [
         el("summary", { text: "詳細情報" }),

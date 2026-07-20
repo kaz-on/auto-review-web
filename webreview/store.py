@@ -37,6 +37,8 @@ class Job:
     finished_at: float | None = None
     progress: list[str] = field(default_factory=list)
     error: str | None = None
+    # レビュー完了後に自動で PR へ投稿するか。
+    auto_post: bool = True
     # レビュー成功時のメタ情報 (レビュー本文はファイルから都度読み出す)
     base_ref: str | None = None
     pr_title: str | None = None
@@ -102,7 +104,9 @@ class JobStore:
             return any(j.status in (QUEUED, RUNNING) for j in self._jobs.values())
 
     # --- 更新 ---------------------------------------------------------------
-    def create(self, url: str, owner: str, repo: str, number: int) -> Job:
+    def create(
+        self, url: str, owner: str, repo: str, number: int, auto_post: bool = True
+    ) -> Job:
         with self._lock:
             job = Job(
                 id=uuid.uuid4().hex[:12],
@@ -110,10 +114,23 @@ class JobStore:
                 owner=owner,
                 repo=repo,
                 number=number,
+                auto_post=auto_post,
             )
             self._jobs[job.id] = job
             self._persist_locked()
             return job
+
+    def delete(self, job_id: str) -> bool:
+        """終了済み (succeeded/failed) のジョブを履歴から削除する。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if job.status in (QUEUED, RUNNING):
+                return False
+            del self._jobs[job_id]
+            self._persist_locked()
+            return True
 
     def update(self, job_id: str, **fields: Any) -> Job | None:
         with self._lock:
