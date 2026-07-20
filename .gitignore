@@ -1,0 +1,17 @@
+# 既存の運用スクリプト(リポジトリにはコミットしない運用)
+/auto_review.sh
+/list_review.sh
+
+# Web システムのランタイムデータ(クローンしたリポジトリ・レビューログ・ジョブ履歴)
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# エディタ / OS
+.DS_Store
+*.swp
