@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex レビュー</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Codex レビュー</h1>
+    <p class="meta" id="config-meta"></p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="run">レビュー実行</button>
+    <button class="tab-btn" data-tab="summary">集計</button>
+  </nav>
+
+  <!-- ===== レビュー実行タブ ===== -->
+  <section id="tab-run" class="tab-panel active">
+    <form id="review-form">
+      <label for="pr-url">PR の URL</label>
+      <div class="form-row">
+        <input type="text" id="pr-url" name="url"
+               placeholder="https://github.com/&lt;org&gt;/&lt;repo&gt;/pull/&lt;番号&gt;"
+               autocomplete="off">
+        <button type="submit" id="submit-btn">レビュー実行</button>
+      </div>
+      <p id="form-message" class="form-message"></p>
+    </form>
+
+    <div id="busy-banner" class="banner hidden"></div>
+
+    <h2>レビュー一覧</h2>
+    <div id="job-list" class="job-list"></div>
+    <p id="job-empty" class="empty hidden">まだレビューはありません。</p>
+  </section>
+
+  <!-- ===== 集計タブ ===== -->
+  <section id="tab-summary" class="tab-panel">
+    <div class="form-row">
+      <button id="reload-summary">集計を更新</button>
+      <span id="summary-status" class="meta"></span>
+    </div>
+    <div id="summary-list" class="summary-list"></div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
