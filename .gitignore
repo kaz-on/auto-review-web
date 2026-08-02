@@ -5,6 +5,9 @@
 # Web システムのランタイムデータ(クローンしたリポジトリ・レビューログ・ジョブ履歴)
 /data/
 
+# docker compose の環境変数 (トークンを含む)
+/.env
+
 # Python
 __pycache__/
 *.py[cod]

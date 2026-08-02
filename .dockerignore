@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+venv
+data
+**/__pycache__
+*.pyc
+.env
+auto_review.sh
+list_review.sh
+review_logs
+README.md

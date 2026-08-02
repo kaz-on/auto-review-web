@@ -15,23 +15,50 @@ LAN 内の PC からブラウザで使える軽量な Web アプリに置き換�
 
 ## 動作要件
 
+- **Docker で起動する場合（推奨）**: Docker / Docker Compose のみ。`git` / `gh` /
+  `codex` はイメージに含まれる。
+- **ホストで直接起動する場合**: Python 3.10 以上、および `git` / GitHub CLI
+  (`gh`, 認証済み) / `codex` が導入済みであること。
+
+## 起動方法A: Docker Compose（推奨）
+
+ホストに `git` / `gh` / `codex` を入れなくても、Docker だけで起動できる。
+GitHub CLI・Codex CLI はイメージに含まれ、認証は環境変数で渡す
+（ホストの認証ディレクトリは共有しない）。
+
+```bash
+cp .env.example .env
+# .env に GH_TOKEN と CODEX_API_KEY を設定する
+docker compose up -d --build
+```
+
+起動後、LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
+
+- 認証: `GH_TOKEN`（GitHub CLI と private リポジトリの clone/fetch に使用）、
+  `CODEX_API_KEY`（Codex CLI）。いずれも `.env` から環境変数として渡す。
+- 永続化: git リポジトリ（`review_repos`）とログ（`review_logs`）は named volume。
+  ジョブ履歴・PR タイトルキャッシュもログ volume 内に保存される。
+- 停止 / ログ確認:
+
+  ```bash
+  docker compose down          # 停止（volume は保持）
+  docker compose logs -f       # ログ確認
+  docker compose down -v       # volume ごと削除（履歴・クローンも消える）
+  ```
+
+## 起動方法B: ホストで直接起動
+
 レビューを実行する PC に以下が導入済みであること（既存スクリプトと同じ）。
 
 - Python 3.10 以上
 - `git` / GitHub CLI (`gh`, 認証済み) / `codex`
-
-## 起動
 
 ```bash
 ./run.sh
 ```
 
 初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、
-LAN 内の任意の PC のブラウザから次の URL でアクセスする。
-
-```
-http://<レビュー実行PCのIP>:8080/
-```
+LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
 
 手動で起動する場合:
 
@@ -75,7 +102,11 @@ webreview/
   aggregate.py   list_review.sh のポート（レビューログ集計）
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
-run.sh           起動スクリプト
+run.sh                起動スクリプト（ホスト直接起動用）
+Dockerfile            gh / codex / アプリを含むイメージ定義
+docker-compose.yml    起動定義（volume・環境変数）
+docker-entrypoint.sh  GH_TOKEN で git 認証を設定して起動
+.env.example          docker compose 用の環境変数テンプレート
 ```
 
 ## API

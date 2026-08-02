@@ -22,7 +22,8 @@ _TITLE_CACHE_LOCK = threading.Lock()
 
 
 def _title_cache_path() -> Path:
-    return config.LOGS_PATH.parent / "pr_titles.json"
+    # ログと同じディレクトリに置く (Docker ではログ volume 内に永続化される)。
+    return config.LOGS_PATH / "pr_titles.json"
 
 
 def _load_title_cache() -> dict[str, str]:
