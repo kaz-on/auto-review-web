@@ -7,7 +7,12 @@ services:
       - "${REVIEW_PORT:-8080}:8080"
     environment:
       # 認証 (ホストの認証ディレクトリは共有しない)
-      GH_TOKEN: ${GH_TOKEN:?GH_TOKEN を .env に設定してください}
+      # GITHUB_AUTH_MODE=pat なら GH_TOKEN、app なら GITHUB_APP_* を使う。
+      GITHUB_AUTH_MODE: ${GITHUB_AUTH_MODE:-pat}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
       CODEX_API_KEY: ${CODEX_API_KEY:?CODEX_API_KEY を .env に設定してください}
       # レビュー設定
       REVIEW_ORG: ${REVIEW_ORG:-your-org}
@@ -16,6 +21,9 @@ services:
       # git リポジトリとログファイルは volume で永続化する。
       - review_repos:/data/work
       - review_logs:/data/review_logs
+      # GitHub App の秘密鍵 (GITHUB_AUTH_MODE=app のときのみ使う)。
+      # ホスト側に鍵が無い場合もマウントできるよう、ディレクトリごと read-only で渡す。
+      - ./secrets:/run/secrets:ro
     security_opt:
       # bubblewrap を使うため、AppArmor を無効化する。seccomp は無効化せず、pivot_root を使うための seccomp プロファイルを指定する。
       - apparmor:unconfined

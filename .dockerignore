@@ -6,6 +6,7 @@ data
 **/__pycache__
 *.pyc
 .env
+secrets
 auto_review.sh
 list_review.sh
 review_logs
