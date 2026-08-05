@@ -15,27 +15,65 @@ LAN 内の PC からブラウザで使える軽量な Web アプリに置き換�
 
 ## 動作要件
 
-- **Docker で起動する場合（推奨）**: Docker / Docker Compose のみ。`git` / `gh` /
-  `codex` はイメージに含まれる。
-- **ホストで直接起動する場合**: Python 3.10 以上、および `git` / GitHub CLI
-  (`gh`, 認証済み) / `codex` が導入済みであること。
+- **Docker で起動する場合（推奨）**: Docker / Docker Compose のみ。`git` / `codex`
+  はイメージに含まれる。
+- **ホストで直接起動する場合**: Python 3.10 以上、および `git` / `codex` が
+  導入済みであること。
+
+GitHub へのアクセスは REST API と `git` で行うため、GitHub CLI (`gh`) は不要。
+
+## GitHub 認証
+
+`GITHUB_AUTH_MODE` で 2 方式を選べる。
+
+### `pat`（既定）
+
+`GH_TOKEN` に Personal Access Token を設定する。repo の読み取りと PR コメントの
+権限が必要。
+
+### `app`
+
+GitHub App の秘密鍵から installation access token を都度発行する。App には
+**Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、
+`REVIEW_ORG` の Organization にインストールしておく。
+
+```ini
+GITHUB_AUTH_MODE=app
+GITHUB_APP_CLIENT_ID=Iv23li...              # App の Client ID（App ID でも可）
+GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem
+GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_ORG から自動解決
+```
+
+秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを
+`/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。
+ファイルではなく PEM 文字列を直接渡したい場合は `GITHUB_APP_PRIVATE_KEY` を使う
+（改行は `\n` で書ける）。
+
+installation access token は 1 時間で失効するため、**GitHub にアクセスする直前に
+取得し、残り有効期間が 5 分を切ったら再発行する**（`GITHUB_TOKEN_REFRESH_MARGIN`
+で調整可）。起動時やジョブ開始時にまとめて取得する方式は、常駐サーバや「完了から
+時間が経ってからの手動投稿」で失効するため採っていない。
+
+トークンは実行のたびに subprocess の環境変数として渡され、git には環境変数を読む
+credential helper 経由で渡る。ホストやイメージに認証設定は残らず、コマンドライン
+や進捗ログにトークンが現れることもない。
 
 ## 起動方法A: Docker Compose（推奨）
 
-ホストに `git` / `gh` / `codex` を入れなくても、Docker だけで起動できる。
-GitHub CLI・Codex CLI はイメージに含まれ、認証は環境変数で渡す
+ホストに `git` / `codex` を入れなくても、Docker だけで起動できる。
+Codex CLI はイメージに含まれ、認証は環境変数で渡す
 （ホストの認証ディレクトリは共有しない）。
 
 ```bash
 cp .env.example .env
-# .env に GH_TOKEN と CODEX_API_KEY を設定する
+# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）と CODEX_API_KEY を設定する
 docker compose up -d --build
 ```
 
 起動後、LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
 
-- 認証: `GH_TOKEN`（GitHub CLI と private リポジトリの clone/fetch に使用）、
-  `CODEX_API_KEY`（Codex CLI）。いずれも `.env` から環境変数として渡す。
+- 認証: 上記「GitHub 認証」の設定と `CODEX_API_KEY`（Codex CLI）。
+  いずれも `.env` から環境変数として渡す。
 - 永続化: git リポジトリ（`review_repos`）とログ（`review_logs`）は named volume。
   ジョブ履歴・PR タイトルキャッシュもログ volume 内に保存される。
 - 停止 / ログ確認:
@@ -48,10 +86,12 @@ docker compose up -d --build
 
 ## 起動方法B: ホストで直接起動
 
-レビューを実行する PC に以下が導入済みであること（既存スクリプトと同じ）。
+レビューを実行する PC に以下が導入済みであること。
 
 - Python 3.10 以上
-- `git` / GitHub CLI (`gh`, 認証済み) / `codex`
+- `git` / `codex`
+
+認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。
 
 ```bash
 ./run.sh
@@ -82,6 +122,14 @@ python3 -m venv .venv
 
 | 環境変数 | 既定値 | 説明 |
 | --- | --- | --- |
+| `GITHUB_AUTH_MODE` | `pat` | GitHub 認証方式（`pat` / `app`） |
+| `GH_TOKEN` | （空） | `pat` モードの Personal Access Token |
+| `GITHUB_APP_CLIENT_ID` | （空） | `app` モードの Client ID（App ID も可） |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
+| `GITHUB_APP_PRIVATE_KEY` | （空） | 秘密鍵を PEM 文字列で渡す場合 |
+| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_ORG` から自動解決 |
+| `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
+| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
 | `REVIEW_ORG` | `your-org` | 許可する GitHub Organization |
 | `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリのクローン先 |
@@ -89,13 +137,16 @@ python3 -m venv .venv
 | `REVIEW_JOBS_FILE` | `data/jobs.json` | ジョブ履歴の保存先 |
 | `REVIEW_HOST` | `0.0.0.0` | 待ち受けアドレス |
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
-| `REVIEW_GH_BIN` / `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `gh` / `git` / `codex` | 各コマンドのパス |
+| `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
 
 ## 構成
 
 ```
 webreview/
   config.py      設定（環境変数で上書き可能）
+  errors.py      画面に出す想定の共通例外
+  github_auth.py GitHub のトークン供給（PAT / GitHub App）
+  github_api.py  GitHub REST API の薄いラッパ
   review.py      auto_review.sh の非対話ポート（レビュー実行・投稿）
   store.py       ジョブ状態の管理と JSON 永続化（スレッドセーフ）
   worker.py      単一ワーカーによる直列実行キュー
@@ -103,9 +154,9 @@ webreview/
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
 run.sh                起動スクリプト（ホスト直接起動用）
-Dockerfile            gh / codex / アプリを含むイメージ定義
+Dockerfile            codex / アプリを含むイメージ定義
 docker-compose.yml    起動定義（volume・環境変数）
-docker-entrypoint.sh  GH_TOKEN で git 認証を設定して起動
+secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 .env.example          docker compose 用の環境変数テンプレート
 ```
 
@@ -128,7 +179,7 @@ Web からは人手の確認（y/N）を挟めないため、次のように自�
 - ログ世代（rev）が既に存在する場合 → 確認せず新しい rev を自動採番。
 - codex レビューの実行確認 → ジョブ投入をもって実行。
 - PR への投稿確認 → 既定では完了後に自動投稿。OFF の場合は「PR に投稿」ボタンで実行。
-- 作業ツリーが dirty でも、毎回 base ブランチへ `reset --hard` + `clean` して復帰。
+- 作業ツリーが dirty でも、毎回 PR のコミットへ `checkout --force` + `clean` して復帰。
 
 なお `auto_review.sh` / `list_review.sh` は従来どおりリポジトリにコミットせず
 配置しておく運用（`.gitignore` 済み）。
