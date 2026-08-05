@@ -7,8 +7,9 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import config
-from .review import ReviewError, parse_pr_url
+from . import config, github_auth
+from .errors import ReviewError
+from .review import parse_pr_url
 from .store import SUCCEEDED, store
 from .worker import ReviewWorker
 
@@ -26,8 +27,23 @@ def _job_public(job) -> dict[str, Any]:
     return data
 
 
+def _check_github_auth() -> None:
+    """認証設定の不備を起動時のログで気付けるようにする。
+
+    ここでは設定の読み込みだけを行い、ネットワークアクセスはしない。不備があっても
+    起動自体は続け、ジョブ実行時に画面へエラーを出す (UI には到達できた方が良い)。
+    """
+    try:
+        github_auth.get_provider()
+    except ReviewError as e:
+        print(f"[warn] GitHub 認証の設定に問題があります: {e}", flush=True)
+    else:
+        print(f"[info] GitHub 認証モード: {config.GITHUB_AUTH_MODE}", flush=True)
+
+
 def create_app() -> Flask:
     config.ensure_dirs()
+    _check_github_auth()
     worker.start()
 
     app = Flask(__name__, static_folder=None)
