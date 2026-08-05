@@ -2,20 +2,20 @@
 
 LOGS_PATH 配下の `codex_review_pr<num>_out.log-<rev>` を更新日時順に集めて、
 リポジトリ・PR 番号・タイトル・レビュー本文・詳細 (err ログ) を構造化して返す。
-PR タイトルは gh 呼び出しが重いのでファイルにキャッシュする。
+PR タイトルは API 呼び出しが重いのでファイルにキャッシュする。
 """
 
 from __future__ import annotations
 
 import json
 import re
-import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, github_api, github_auth
+from .errors import ReviewError
 
 _OUT_RE = re.compile(r"^codex_review_pr(\d+)_out\.log-(\d+)$")
 _TITLE_CACHE_LOCK = threading.Lock()
@@ -50,13 +50,11 @@ def _fetch_title(repo: str, pr_num: int, cache: dict[str, str]) -> str:
     if key in cache:
         return cache[key]
     try:
-        proc = subprocess.run(
-            [config.GH_BIN, "pr", "view", str(pr_num), "-R",
-             f"{config.REVIEW_ORG}/{repo}", "--json", "title", "-q", ".title"],
-            capture_output=True, text=True, timeout=30,
-        )
-        title = proc.stdout.strip() if proc.returncode == 0 else ""
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        title = github_api.get_pull(
+            github_auth.get_provider(), config.REVIEW_ORG, repo, pr_num
+        ).title
+    except ReviewError:
+        # 削除された PR や認証未設定でも集計自体は成立させる。
         title = ""
 
     if title:

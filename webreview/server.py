@@ -113,7 +113,7 @@ def create_app() -> Flask:
     # --- 集計 ------------------------------------------------------------
     @app.get("/api/summary")
     def api_summary():
-        # 遅延 import (gh 呼び出しを伴うため必要時のみ)
+        # 遅延 import (GitHub API 呼び出しを伴うため必要時のみ)
         from . import aggregate
         return jsonify({"entries": aggregate.build_summary()})
 
