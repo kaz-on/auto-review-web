@@ -16,6 +16,14 @@ services:
       # git リポジトリとログファイルは volume で永続化する。
       - review_repos:/data/work
       - review_logs:/data/review_logs
+    security_opt:
+      # bubblewrap を使うため、AppArmor を無効化する。seccomp は無効化せず、pivot_root を使うための seccomp プロファイルを指定する。
+      - apparmor:unconfined
+      #- seccomp:unconfined
+      - seccomp=./seccomp-bwrap.json
+    cap_add:
+      # bubblewrap を使うため、SYS_ADMIN 権限を付与する。
+      - SYS_ADMIN
     restart: unless-stopped
 
 volumes:

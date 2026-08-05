@@ -29,6 +29,10 @@ RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
     && ln -sf "$target" /usr/local/bin/codex \
     && codex --version
 
+# Codex CLI は bubblewrap を使ってサンドボックス化するため、bubblewrap をインストールする。
+RUN apt-get update && apt-get install -y bubblewrap && \
+    rm -rf /var/lib/apt/lists/*
+
 # --- アプリケーション -------------------------------------------------------
 WORKDIR /app
 
