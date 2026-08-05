@@ -1,1 +1,3 @@
 Flask>=3.0
+# GitHub App 認証で installation access token を得るための JWT (RS256) 署名に使う。
+PyJWT[crypto]>=2.8

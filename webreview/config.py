@@ -26,6 +26,30 @@ REVIEW_ORG = os.environ.get("REVIEW_ORG", "your-org")
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-5.6-terra")
 
 
+# --- GitHub 認証 --------------------------------------------------------------
+# "pat" = GH_TOKEN の Personal Access Token をそのまま使う。
+# "app" = GitHub App の秘密鍵から installation access token を都度発行する。
+GITHUB_AUTH_MODE = os.environ.get("GITHUB_AUTH_MODE", "pat").strip().lower()
+
+# GitHub REST API のベース URL (GitHub Enterprise Server では変更する)。
+GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+
+# pat モード用。
+GH_TOKEN = os.environ.get("GH_TOKEN", "")
+
+# app モード用。CLIENT_ID は JWT の iss に使う (GitHub のドキュメントは App ID より
+# Client ID を推奨しているが、App ID を入れても動作する)。
+GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "").strip()
+# 秘密鍵は PATH (推奨: read-only マウント) か PEM 文字列そのもので渡す。
+GITHUB_APP_PRIVATE_KEY_PATH = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip()
+GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+# 省略時は REVIEW_ORG の installation を API で解決する。
+GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "").strip()
+
+# installation access token (有効期間 1 時間) の残りがこれを下回ったら再発行する (秒)。
+GITHUB_TOKEN_REFRESH_MARGIN = int(os.environ.get("GITHUB_TOKEN_REFRESH_MARGIN", "300"))
+
+
 # --- データの保存先 ----------------------------------------------------------
 # リポジトリをクローンする作業ディレクトリ。
 WORK_PATH = _env_path("REVIEW_WORK_PATH", BASE_DIR / "data" / "work")
@@ -38,7 +62,6 @@ JOBS_FILE = _env_path("REVIEW_JOBS_FILE", BASE_DIR / "data" / "jobs.json")
 
 
 # --- 外部コマンド ------------------------------------------------------------
-GH_BIN = os.environ.get("REVIEW_GH_BIN", "gh")
 GIT_BIN = os.environ.get("REVIEW_GIT_BIN", "git")
 CODEX_BIN = os.environ.get("REVIEW_CODEX_BIN", "codex")
 
