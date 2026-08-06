@@ -132,12 +132,18 @@ python3 -m venv .venv
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
 | `REVIEW_ORG` | `your-org` | 許可する GitHub Organization |
 | `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
+| `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリのクローン先 |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | レビューログのルート |
 | `REVIEW_JOBS_FILE` | `data/jobs.json` | ジョブ履歴の保存先 |
 | `REVIEW_HOST` | `0.0.0.0` | 待ち受けアドレス |
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
 | `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
+
+`codex` には上記に加えて
+`--sandbox read-only --ask-for-approval never --config model_reasoning_summary=none`
+を固定で渡す。非対話実行で承認待ちに固まらず、作業ツリーを書き換えず、推論サマリを
+レビュー本文に混ぜないため。
 
 ## 構成
 

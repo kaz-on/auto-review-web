@@ -50,8 +50,11 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 
 // ---- 設定表示 --------------------------------------------------------------
 fetchJSON("/api/config").then((cfg) => {
+  const model = cfg.reasoning_effort
+    ? `${cfg.model}（reasoning: ${cfg.reasoning_effort}）`
+    : cfg.model;
   document.getElementById("config-meta").textContent =
-    `対象 Organization: ${cfg.org} / モデル: ${cfg.model}`;
+    `対象 Organization: ${cfg.org} / モデル: ${model}`;
 }).catch(() => {});
 
 // ---- レビュー投入フォーム --------------------------------------------------

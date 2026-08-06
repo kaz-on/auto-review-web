@@ -60,7 +60,11 @@ def create_app() -> Flask:
     # --- 設定 ------------------------------------------------------------
     @app.get("/api/config")
     def api_config():
-        return jsonify({"org": config.REVIEW_ORG, "model": config.REVIEW_MODEL})
+        return jsonify({
+            "org": config.REVIEW_ORG,
+            "model": config.REVIEW_MODEL,
+            "reasoning_effort": config.REVIEW_REASONING_EFFORT,
+        })
 
     # --- レビュー実行 ----------------------------------------------------
     @app.post("/api/reviews")

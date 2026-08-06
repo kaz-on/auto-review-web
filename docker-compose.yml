@@ -17,6 +17,7 @@ services:
       # レビュー設定
       REVIEW_ORG: ${REVIEW_ORG:-your-org}
       REVIEW_MODEL: ${REVIEW_MODEL:-gpt-5.6-terra}
+      REVIEW_REASONING_EFFORT: ${REVIEW_REASONING_EFFORT:-medium}
     volumes:
       # git リポジトリとログファイルは volume で永続化する。
       - review_repos:/data/work

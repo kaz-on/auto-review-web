@@ -160,6 +160,31 @@ def _codex_env() -> dict[str, str]:
     return env
 
 
+def _codex_args(prompt: str) -> list[str]:
+    """codex の起動引数を組み立てる。
+
+    Web からの非対話実行なので、承認待ちで止まったり作業ツリーを書き換えたりしない
+    設定を固定で渡す。推論サマリはレビュー本文に混ざるノイズなので抑制する。
+    """
+    args = [config.CODEX_BIN, "--model", config.REVIEW_MODEL]
+    if config.REVIEW_REASONING_EFFORT:
+        args += ["--config", f"model_reasoning_effort={config.REVIEW_REASONING_EFFORT}"]
+    args += [
+        "--sandbox", "read-only",
+        "--ask-for-approval", "never",
+        "--config", "model_reasoning_summary=none",
+        "review", prompt,
+    ]
+    return args
+
+
+def _model_label() -> str:
+    """進捗表示・ログヘッダに出すモデル設定の表記。"""
+    if config.REVIEW_REASONING_EFFORT:
+        return f"{config.REVIEW_MODEL}, reasoning={config.REVIEW_REASONING_EFFORT}"
+    return config.REVIEW_MODEL
+
+
 def _check_tools() -> None:
     for name, path in (
         ("git", config.GIT_BIN),
@@ -284,15 +309,16 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> ReviewResult
     stdout_path = output_dir / f"codex_review_pr{pr.number}_out.log-{rev}"
     stderr_path = output_dir / f"codex_review_pr{pr.number}_err.log-{rev}"
 
-    progress(f"codex レビューを実行します ({config.REVIEW_MODEL}, rev-{rev})...")
-    header = f"codex review ({config.REVIEW_MODEL}, rev-{rev}):\n\n"
+    label = _model_label()
+    progress(f"codex レビューを実行します ({label}, rev-{rev})...")
+    header = f"codex review ({label}, rev-{rev}):\n\n"
     with open(stdout_path, "w", encoding="utf-8") as out_f, \
             open(stderr_path, "w", encoding="utf-8") as err_f:
         out_f.write(header)
         out_f.flush()
         try:
             proc = subprocess.run(
-                [config.CODEX_BIN, "--model", config.REVIEW_MODEL, "review", prompt],
+                _codex_args(prompt),
                 cwd=str(repo_path),
                 stdout=out_f,
                 stderr=err_f,

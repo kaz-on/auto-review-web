@@ -25,6 +25,10 @@ REVIEW_ORG = os.environ.get("REVIEW_ORG", "your-org")
 # codex に渡すレビューモデル。
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-5.6-terra")
 
+# codex に渡す推論の深さ (model_reasoning_effort)。
+# 空にするとオプション自体を渡さず、モデル/codex 側の既定に従う。
+REVIEW_REASONING_EFFORT = os.environ.get("REVIEW_REASONING_EFFORT", "medium").strip()
+
 
 # --- GitHub 認証 --------------------------------------------------------------
 # "pat" = GH_TOKEN の Personal Access Token をそのまま使う。
