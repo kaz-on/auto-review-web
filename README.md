@@ -133,6 +133,7 @@ python3 -m venv .venv
 | `REVIEW_ORG` | `your-org` | 許可する GitHub Organization |
 | `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
+| `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリのクローン先 |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | レビューログのルート |
 | `REVIEW_JOBS_FILE` | `data/jobs.json` | ジョブ履歴の保存先 |
@@ -144,6 +145,32 @@ python3 -m venv .venv
 `--sandbox read-only --ask-for-approval never --config model_reasoning_summary=none`
 を固定で渡す。非対話実行で承認待ちに固まらず、作業ツリーを書き換えず、推論サマリを
 レビュー本文に混ぜないため。
+
+## 説明文の書式（`REVIEW_DESCRIPTION`）
+
+`REVIEW_DESCRIPTION` を設定すると、画面上部（Organization / モデル表示の下）に
+説明欄が出る。レビューの概要や説明ページへのリンクを載せる用途を想定している。
+未設定なら欄そのものが表示されない。
+
+`.env` の値は 1 行でしか書けないため、**リテラルの `\n` を改行として解釈する**。
+書式は最小限の Markdown 風で、次の 4 つだけをサポートする。
+
+| 書き方 | 表示 |
+| --- | --- |
+| `\n\n`（空行） | 段落の区切り |
+| `\n`（単独の改行） | 段落内の改行 |
+| 行頭の `- ` | 箇条書き（連続する行がすべて `- ` で始まる場合） |
+| `[表示文字列](https://…)` / 裸の `https://…` | リンク（別タブで開く） |
+
+例:
+
+```ini
+REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実行します。\n\n- 使い方: [説明ページ](https://example.com/codex-review)\n- 不具合の報告: [#codex-review](https://example.com/chat)
+```
+
+見出し・強調・画像・HTML はサポートしない。設定値は DOM のテキストノードとして
+描画されるため、HTML タグを書いてもマークアップとしては解釈されずそのまま表示される
+（説明文経由でスクリプトが混入することはない）。
 
 ## 構成
 
@@ -176,7 +203,7 @@ secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |
 | `GET /api/summary` | レビューログの集計 |
-| `GET /api/config` | Organization / モデル名 |
+| `GET /api/config` | Organization / モデル名 / reasoning effort / 説明文 |
 
 ## 元スクリプトとの差分（対話部分の置き換え）
 

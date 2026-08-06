@@ -64,6 +64,7 @@ def create_app() -> Flask:
             "org": config.REVIEW_ORG,
             "model": config.REVIEW_MODEL,
             "reasoning_effort": config.REVIEW_REASONING_EFFORT,
+            "description": config.REVIEW_DESCRIPTION,
         })
 
     # --- レビュー実行 ----------------------------------------------------

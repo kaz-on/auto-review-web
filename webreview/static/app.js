@@ -48,6 +48,63 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
+// ---- 説明文 (REVIEW_DESCRIPTION) -------------------------------------------
+// 書式: 空行で段落を分け、行頭 "- " の行は箇条書きになる。
+// リンクは [表示文字列](URL) 形式か、裸の http(s) URL を書く。
+// HTML は解釈せず DOM 構築だけで描画するため、設定値がマークアップとして
+// 埋め込まれることはない。
+// 裸の URL は RFC 3986 で使える文字だけを拾う (和文の約物を巻き込まないため)。
+const LINK_RE =
+  /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[\w\-._~:/?#@!$&'*+,;=%[\]]+)/g;
+
+function appendInline(parent, text) {
+  let last = 0;
+  for (const m of text.matchAll(LINK_RE)) {
+    let [matched, label, url, bare] = m;
+    if (bare) {
+      // 「...です。」のように文末の約物まで URL に取り込まないよう削る。
+      const trail = bare.match(/[.,:;!?)\]、。」）]+$/);
+      if (trail) {
+        bare = bare.slice(0, -trail[0].length);
+        matched = bare;
+      }
+    }
+    if (m.index > last) {
+      parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    }
+    parent.appendChild(el("a", {
+      href: url || bare, text: label || bare,
+      attrs: { target: "_blank", rel: "noopener" },
+    }));
+    last = m.index + matched.length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function renderDescription(text) {
+  const box = document.getElementById("description");
+  if (!text) return; // 未設定なら領域ごと出さない
+  for (const block of text.split(/\n\s*\n/)) {
+    const lines = block.split("\n").map((l) => l.trim()).filter((l) => l);
+    if (!lines.length) continue;
+    if (lines.every((l) => l.startsWith("- "))) {
+      box.appendChild(el("ul", {}, lines.map((line) => {
+        const li = el("li");
+        appendInline(li, line.slice(2));
+        return li;
+      })));
+    } else {
+      const p = el("p");
+      lines.forEach((line, i) => {
+        if (i) p.appendChild(el("br"));
+        appendInline(p, line);
+      });
+      box.appendChild(p);
+    }
+  }
+  box.classList.remove("hidden");
+}
+
 // ---- 設定表示 --------------------------------------------------------------
 fetchJSON("/api/config").then((cfg) => {
   const model = cfg.reasoning_effort
@@ -55,6 +112,7 @@ fetchJSON("/api/config").then((cfg) => {
     : cfg.model;
   document.getElementById("config-meta").textContent =
     `対象 Organization: ${cfg.org} / モデル: ${model}`;
+  renderDescription(cfg.description);
 }).catch(() => {});
 
 // ---- レビュー投入フォーム --------------------------------------------------

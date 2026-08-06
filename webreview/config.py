@@ -29,6 +29,10 @@ REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-5.6-terra")
 # 空にするとオプション自体を渡さず、モデル/codex 側の既定に従う。
 REVIEW_REASONING_EFFORT = os.environ.get("REVIEW_REASONING_EFFORT", "medium").strip()
 
+# 画面上部に表示する説明文 (任意)。書式は README「説明文の書式」を参照。
+# .env には 1 行でしか書けないため、リテラルの "\n" を改行として解釈する。
+REVIEW_DESCRIPTION = os.environ.get("REVIEW_DESCRIPTION", "").replace("\\n", "\n").strip()
+
 
 # --- GitHub 認証 --------------------------------------------------------------
 # "pat" = GH_TOKEN の Personal Access Token をそのまま使う。

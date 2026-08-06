@@ -29,6 +29,21 @@ header {
 header h1 { margin: 0; font-size: 1.3rem; }
 .meta { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0; }
 
+.description {
+  max-width: 900px;
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.description > :first-child { margin-top: 0; }
+.description > :last-child { margin-bottom: 0; }
+.description p { margin: 0.5rem 0; }
+.description ul { margin: 0.5rem 0; padding-left: 1.3rem; }
+.description a { color: var(--accent); }
+
 .tabs {
   display: flex;
   gap: 0.25rem;
