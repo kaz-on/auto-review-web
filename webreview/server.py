@@ -57,9 +57,12 @@ def create_app() -> Flask:
     # 初回起動時だけ、ファイル保持だった頃のデータを取り込む。取り込み済みの
     # 環境では走らない。手動で確認したい場合は python -m webreview.migrate。
     if migrate.needed():
-        print("[info] 既存のレビューログを取り込みます...", flush=True)
-        for line in migrate.run().lines():
-            print(f"[info] {line}", flush=True)
+        report = migrate.run()
+        # 新規インストールでは取り込むものが無いので、何かあったときだけ報告する。
+        if report.reviews_imported or report.jobs_imported or report.titles_imported:
+            print("[info] 既存のレビューログを取り込みました:", flush=True)
+            for line in report.lines():
+                print(f"[info] {line}", flush=True)
 
     interrupted = store.recover_interrupted()
     if interrupted:

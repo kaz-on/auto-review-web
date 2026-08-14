@@ -1,7 +1,8 @@
 # auto_review Web システム
 
-既存の `auto_review.sh`（レビュー実行・投稿）と `list_review.sh`（集計）の運用を、
-LAN 内の PC からブラウザで使える軽量な Web アプリに置き換えたもの。
+LAN 内の PC からブラウザで使える、Codex による PR レビューの実行・投稿・集計ツール。
+もとは `auto_review.sh`（レビュー実行・投稿）と `list_review.sh`（集計）の置き換えとして
+作られたが、現在はスクリプトを使わず単体で動作する。
 
 ## できること
 
@@ -10,7 +11,7 @@ LAN 内の PC からブラウザで使える軽量な Web アプリに置き換�
 - レビュー完了後に **自動的に PR へ投稿** できる（既定でON。フォームのチェックで切替可）。
 - 自動投稿をOFFにした場合や自動投稿に失敗した場合は、ボタンから手動で投稿できる。
 - 終了したレビューは履歴から削除して一覧を整理できる（ログファイルは残る）。
-- 過去のレビューログの集計をブラウザで閲覧できる。
+- 過去のレビューを一覧・検索できる（リポジトリでの絞り込みと本文検索に対応）。
 - エラーが発生した場合は画面にエラーメッセージを表示する。
 
 ## 動作要件
@@ -74,8 +75,8 @@ docker compose up -d --build
 
 - 認証: 上記「GitHub 認証」の設定と `CODEX_API_KEY`（Codex CLI）。
   いずれも `.env` から環境変数として渡す。
-- 永続化: git リポジトリ（`review_repos`）とログ（`review_logs`）は named volume。
-  ジョブ履歴・PR タイトルキャッシュもログ volume 内に保存される。
+- 永続化: git リポジトリ（`review_repos`）と、DB・codex の生ログ（`review_logs`）は
+  named volume。ジョブ履歴・レビュー本文・PR タイトルはすべて DB に入る。
 - 停止 / ログ確認:
 
   ```bash
@@ -134,9 +135,11 @@ python3 -m venv .venv
 | `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
+| `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |
+| `REVIEW_STDERR_RETENTION_DAYS` | `30` | codex 生ログの保持日数。`0` で削除しない |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリのクローン先 |
-| `REVIEW_LOGS_PATH` | `data/review_logs` | レビューログのルート |
-| `REVIEW_JOBS_FILE` | `data/jobs.json` | ジョブ履歴の保存先 |
+| `REVIEW_LOGS_PATH` | `data/review_logs` | codex の生ログのルート |
+| `REVIEW_DB_PATH` | `data/review.db` | SQLite データベースの位置 |
 | `REVIEW_HOST` | `0.0.0.0` | 待ち受けアドレス |
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
 | `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
@@ -178,12 +181,14 @@ REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実�
 webreview/
   config.py      設定（環境変数で上書き可能）
   errors.py      画面に出す想定の共通例外
+  db.py          SQLite の接続管理とスキーマ
   github_auth.py GitHub のトークン供給（PAT / GitHub App）
   github_api.py  GitHub REST API の薄いラッパ
-  review.py      auto_review.sh の非対話ポート（レビュー実行・投稿）
-  store.py       ジョブ状態の管理と JSON 永続化（スレッドセーフ）
+  review.py      レビューの実行と投稿（codex / git の駆動）
+  store.py       ジョブ状態の管理
+  reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ
+  migrate.py     ファイル保持だった頃のデータの取り込み
   worker.py      単一ワーカーによる直列実行キュー
-  aggregate.py   list_review.sh のポート（レビューログ集計）
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
 run.sh                起動スクリプト（ホスト直接起動用）
@@ -202,17 +207,45 @@ secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 | `GET /api/reviews/<id>` | ジョブ詳細（レビュー本文を含む） |
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |
-| `GET /api/summary` | レビューログの集計 |
+| `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない |
+| `GET /api/summary/<id>` | レビュー本文と詳細情報 |
 | `GET /api/config` | Organization / モデル名 / reasoning effort / 説明文 |
 
-## 元スクリプトとの差分（対話部分の置き換え）
+## データの持ち方
 
-Web からは人手の確認（y/N）を挟めないため、次のように自動化した。
+状態はすべて SQLite（`REVIEW_DB_PATH`）に入る。ディスク上に残るファイルは
+git のクローンと codex の生ログ（err）だけ。
+
+codex の 2 つの出力は性質が違うため扱いを分けている。
+
+- **stdout（レビュー本文）** は散文なので分量が頭打ちになる。DB に保存し、
+  ファイルには残さない。
+- **stderr（全トランスクリプト）** は実行した各コマンドとその出力を含み、PR の
+  差分規模に比例して伸びる。ファイルに流したまま gzip し、
+  `REVIEW_STDERR_RETENTION_DAYS` で期限削除する。
+
+生ログはアプリからは読み返さない。集計に必要な先頭の実行条件ブロックだけを
+実行直後に取り出して DB に保存するため、期限削除しても画面表示は変わらない。
+
+レビュー本文の先頭に出る `codex review (モデル, reasoning=..., rev-N):` は、
+保存された本文には含まれない。モデル名などはカラムとして持ち、表示・投稿の
+たびに組み立てる。
+
+### 旧データの取り込み
+
+初回起動時に、`REVIEW_LOGS_PATH` 配下の旧ログ・`jobs.json`・`pr_titles.json` を
+自動で DB に取り込む（取り込み済みの環境では走らない）。手動で実行・確認したい
+場合は次のとおり。再実行しても二重登録されない。
+
+```bash
+python -m webreview.migrate
+```
+
+## 対話部分の置き換え
+
+Web からは人手の確認（y/N）を挟めないため、次のように自動化している。
 
 - ログ世代（rev）が既に存在する場合 → 確認せず新しい rev を自動採番。
 - codex レビューの実行確認 → ジョブ投入をもって実行。
 - PR への投稿確認 → 既定では完了後に自動投稿。OFF の場合は「PR に投稿」ボタンで実行。
 - 作業ツリーが dirty でも、毎回 PR のコミットへ `checkout --force` + `clean` して復帰。
-
-なお `auto_review.sh` / `list_review.sh` は従来どおりリポジトリにコミットせず
-配置しておく運用（`.gitignore` 済み）。

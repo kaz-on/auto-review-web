@@ -30,10 +30,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY webreview ./webreview
 
-# データ (クローンしたリポジトリ・ログ・ジョブ履歴) は /data 以下。volume で永続化。
+# データ (DB・クローンしたリポジトリ・codex の生ログ) は /data 以下。volume で永続化。
+# DB は既存の review_logs volume に置くので、更新時に volume 定義を変えなくてよい。
 ENV REVIEW_WORK_PATH=/data/work \
     REVIEW_LOGS_PATH=/data/review_logs \
-    REVIEW_JOBS_FILE=/data/review_logs/jobs.json \
+    REVIEW_DB_PATH=/data/review_logs/review.db \
     REVIEW_HOST=0.0.0.0 \
     REVIEW_PORT=8080
 
