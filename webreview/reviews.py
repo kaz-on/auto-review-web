@@ -97,6 +97,19 @@ def create(
     return review
 
 
+def set_stderr_path(review_id: int, path: Path | None) -> None:
+    """err ログの最終的な置き場所を記録する。
+
+    rev はレビューを登録して初めて決まるため、実行中は一時名で書いておき、
+    確定した名前をここで結び付ける。
+    """
+    with db.write() as conn:
+        conn.execute(
+            "UPDATE reviews SET stderr_path = ? WHERE id = ?",
+            (str(path) if path else None, review_id),
+        )
+
+
 # --- 参照 -------------------------------------------------------------------
 def get(review_id: int) -> Review | None:
     row = db.connect().execute(

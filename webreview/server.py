@@ -7,23 +7,25 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import config, github_auth
+from . import config, db, github_auth, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
-from .store import SUCCEEDED, store
+from .store import SUCCEEDED
 from .worker import ReviewWorker
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-worker = ReviewWorker(store)
+worker = ReviewWorker()
 
 
-def _job_public(job) -> dict[str, Any]:
-    """API 用にジョブを辞書化する (レビュー本文は含めない)。"""
+def _job_public(job: store.Job) -> dict[str, Any]:
+    """API 用にジョブを辞書化する。
+
+    progress は実行中のジョブにしか載らない (store.list_jobs を参照)。終了した
+    ジョブの進捗は progress_count を見て詳細エンドポイントから取得する。
+    """
     data = job.to_dict()
-    data.pop("stdout_path", None)
-    data.pop("stderr_path", None)
-    data["has_result"] = bool(job.stdout_path)
+    data["has_result"] = job.review_id is not None
     return data
 
 
@@ -41,8 +43,25 @@ def _check_github_auth() -> None:
         print(f"[info] GitHub 認証モード: {config.GITHUB_AUTH_MODE}", flush=True)
 
 
+def _int_arg(name: str, default: int) -> int:
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def create_app() -> Flask:
     config.ensure_dirs()
+    db.init()
+
+    interrupted = store.recover_interrupted()
+    if interrupted:
+        print(f"[info] 中断された {interrupted} 件のジョブを失敗にしました。", flush=True)
+
+    pruned = reviews.prune_stderr()
+    if pruned:
+        print(f"[info] 期限切れの codex ログを {pruned} 件削除しました。", flush=True)
+
     _check_github_auth()
     worker.start()
 
@@ -88,7 +107,7 @@ def create_app() -> Flask:
 
     @app.get("/api/reviews")
     def list_reviews():
-        jobs = store.list()
+        jobs = store.list_jobs()
         return jsonify({
             "jobs": [_job_public(j) for j in jobs],
             "busy": store.has_active(),
@@ -100,10 +119,10 @@ def create_app() -> Flask:
         if job is None:
             return jsonify({"error": "ジョブが見つかりません。"}), 404
         data = _job_public(job)
-        if job.stdout_path and Path(job.stdout_path).exists():
-            data["review_text"] = Path(job.stdout_path).read_text(
-                encoding="utf-8", errors="replace"
-            )
+        if job.review_id is not None:
+            review = reviews.get(job.review_id)
+            if review is not None:
+                data["review_text"] = reviews.render_body(review)
         return jsonify(data)
 
     @app.delete("/api/reviews/<job_id>")
@@ -120,7 +139,7 @@ def create_app() -> Flask:
         job = store.get(job_id)
         if job is None:
             return jsonify({"error": "ジョブが見つかりません。"}), 404
-        if job.status != SUCCEEDED or not job.stdout_path:
+        if job.status != SUCCEEDED or job.review_id is None:
             return jsonify({"error": "完了済みのレビューのみ投稿できます。"}), 400
         if job.posted:
             return jsonify({"error": "このレビューは既に投稿済みです。"}), 400
@@ -134,9 +153,29 @@ def create_app() -> Flask:
     # --- 集計 ------------------------------------------------------------
     @app.get("/api/summary")
     def api_summary():
-        # 遅延 import (GitHub API 呼び出しを伴うため必要時のみ)
-        from . import aggregate
-        return jsonify({"entries": aggregate.build_summary()})
+        """集計一覧。本文は含めず、開かれた時点で個別に取得させる。"""
+        limit = _int_arg("limit", reviews.DEFAULT_LIMIT)
+        offset = max(0, _int_arg("offset", 0))
+        repo = (request.args.get("repo") or "").strip() or None
+        q = (request.args.get("q") or "").strip() or None
+
+        # 未取得・失効ぶんのタイトルを少しずつ埋める (1 回の応答を待たせすぎない)。
+        reviews.refresh_titles()
+
+        return jsonify({
+            "entries": reviews.list_summary(limit=limit, offset=offset, repo=repo, q=q),
+            "total": reviews.count(repo=repo, q=q),
+            "limit": limit,
+            "offset": offset,
+            "repos": reviews.repos(),
+        })
+
+    @app.get("/api/summary/<int:review_id>")
+    def api_summary_detail(review_id: int):
+        detail = reviews.get_detail(review_id)
+        if detail is None:
+            return jsonify({"error": "レビューが見つかりません。"}), 404
+        return jsonify(detail)
 
     return app
 

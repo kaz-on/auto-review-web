@@ -12,13 +12,13 @@ import threading
 import time
 import traceback
 
-from . import review
+from . import review, store
 from .review import ParsedPR, ReviewError
-from .store import RUNNING, SUCCEEDED, FAILED, JobStore
+from .store import RUNNING, SUCCEEDED, FAILED
 
 
 class ReviewWorker:
-    def __init__(self, store: JobStore):
+    def __init__(self) -> None:
         self._store = store
         self._queue: queue.Queue[str] = queue.Queue()
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -67,15 +67,12 @@ class ReviewWorker:
             )
             return
 
+        # レビュー本文・メタ情報は reviews 側に入っているので、ジョブは参照だけ持つ。
         self._store.update(
             job_id,
             status=SUCCEEDED,
             finished_at=time.time(),
-            base_ref=result.base_ref,
-            pr_title=result.pr_title,
-            rev=result.rev,
-            stdout_path=str(result.stdout_path),
-            stderr_path=str(result.stderr_path),
+            review_id=result.id,
         )
 
         # 自動投稿が有効ならそのまま PR に投稿する (ワーカースレッド内で直列に実行)。
@@ -90,7 +87,7 @@ class ReviewWorker:
 
     def _post(self, job_id: str) -> None:
         job = self._store.get(job_id)
-        if job is None or not job.stdout_path:
+        if job is None or job.review_id is None:
             return
 
         def progress(line: str) -> None:
@@ -98,7 +95,7 @@ class ReviewWorker:
 
         pr = ParsedPR(owner=job.owner, repo=job.repo, number=job.number)
         try:
-            review.post_review(pr, job.stdout_path, progress=progress)
+            review.post_review(pr, job.review_id, progress=progress)
         except ReviewError as e:
             self._store.update(job_id, posting=False, post_error=str(e))
             return
