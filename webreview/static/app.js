@@ -182,7 +182,27 @@ function buildCard(job) {
     badge, title, autopost, delBtn, sub, current, errorBox,
     actions, progressPre, progressDetails,
   };
-  return { root, refs, loadedResult: false };
+  const card = {
+    root, refs, loadedResult: false, loadedProgress: false,
+    needsProgressFetch: false,
+  };
+
+  // 終了したジョブの進捗は一覧に含まれないので、開かれた時点で取りに行く。
+  progressDetails.addEventListener("toggle", async () => {
+    if (!progressDetails.open || card.loadedProgress || !card.needsProgressFetch) {
+      return;
+    }
+    card.loadedProgress = true;
+    try {
+      const d = await fetchJSON(`/api/reviews/${job.id}`);
+      progressPre.textContent = (d.progress || []).join("\n");
+    } catch (err) {
+      card.loadedProgress = false;
+      progressPre.textContent = err.message;
+    }
+  });
+
+  return card;
 }
 
 function updateCard(card, job) {
@@ -222,6 +242,11 @@ function updateCard(card, job) {
     r.current.classList.add("hidden");
   }
 
+  // 終了したジョブの進捗は一覧に載らない (progress は null)。開かれた時点で取得する。
+  if (!job.progress && job.progress_count && !card.loadedProgress) {
+    card.needsProgressFetch = true;
+  }
+
   // エラー
   if (job.status === "failed" && job.error) {
     r.errorBox.textContent = job.error;
@@ -230,9 +255,14 @@ function updateCard(card, job) {
     r.errorBox.classList.add("hidden");
   }
 
-  // 進捗ログ
-  r.progressPre.textContent = (job.progress || []).join("\n");
-  r.progressDetails.classList.toggle("hidden", !(job.progress && job.progress.length));
+  // 進捗ログ。実行中は一覧のポーリングで届く内容をそのまま反映し、終了後は
+  // 開かれたときに取得した内容を保持する (再取得しない)。
+  if (job.progress) {
+    r.progressPre.textContent = job.progress.join("\n");
+  } else if (!card.loadedProgress) {
+    r.progressPre.textContent = "開くと読み込みます...";
+  }
+  r.progressDetails.classList.toggle("hidden", !job.progress_count);
 
   // アクション (完了時のみ: 結果表示 + 投稿)
   updateActions(card, job);
@@ -367,19 +397,66 @@ async function refreshJobs() {
 }
 
 // ---- 集計 ------------------------------------------------------------------
+// 一覧はメタデータだけを取得する。本文は件数に比例して重くなるため、行が
+// 開かれた時点で /api/summary/<id> から個別に読み込む。
 const summaryList = document.getElementById("summary-list");
 const summaryStatus = document.getElementById("summary-status");
-document.getElementById("reload-summary").addEventListener("click", loadSummary);
+const summaryRepo = document.getElementById("summary-repo");
+const summaryQ = document.getElementById("summary-q");
+const summaryPager = document.getElementById("summary-pager");
+const summaryRange = document.getElementById("summary-range");
+const summaryPrev = document.getElementById("summary-prev");
+const summaryNext = document.getElementById("summary-next");
 
+const PAGE_SIZE = 50;
+let summaryOffset = 0;
 let summaryLoading = false;
+let summaryTotal = 0;
+
+document.getElementById("reload-summary").addEventListener("click", () => {
+  summaryOffset = 0;
+  loadSummary();
+});
+summaryRepo.addEventListener("change", () => { summaryOffset = 0; loadSummary(); });
+summaryPrev.addEventListener("click", () => {
+  summaryOffset = Math.max(0, summaryOffset - PAGE_SIZE);
+  loadSummary();
+});
+summaryNext.addEventListener("click", () => {
+  if (summaryOffset + PAGE_SIZE < summaryTotal) {
+    summaryOffset += PAGE_SIZE;
+    loadSummary();
+  }
+});
+
+// 入力のたびに投げず、打ち終わりを待ってから検索する。
+let searchTimer = null;
+summaryQ.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { summaryOffset = 0; loadSummary(); }, 300);
+});
+
+function fmtBytes(n) {
+  if (n == null) return "";
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
+}
+
 async function loadSummary() {
   if (summaryLoading) return;
   summaryLoading = true;
   summaryStatus.textContent = "読み込み中...";
   try {
-    const data = await fetchJSON("/api/summary");
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE), offset: String(summaryOffset),
+    });
+    if (summaryRepo.value) params.set("repo", summaryRepo.value);
+    if (summaryQ.value.trim()) params.set("q", summaryQ.value.trim());
+
+    const data = await fetchJSON("/api/summary?" + params);
+    summaryTotal = data.total || 0;
+    syncRepoOptions(data.repos || []);
     renderSummary(data.entries || []);
-    summaryStatus.textContent = `${data.entries.length} 件`;
+    updatePager(data.entries.length);
   } catch (err) {
     summaryStatus.textContent = "読み込みに失敗しました: " + err.message;
   } finally {
@@ -387,35 +464,92 @@ async function loadSummary() {
   }
 }
 
+function syncRepoOptions(repos) {
+  // 選択中の値は保ったまま、選択肢だけ実データに合わせる。
+  const current = summaryRepo.value;
+  if (summaryRepo.dataset.repos === repos.join("\u0000")) return;
+  summaryRepo.dataset.repos = repos.join("\u0000");
+  summaryRepo.textContent = "";
+  // value 属性を省くと option の値が表示文字列になってしまうため必ず指定する。
+  summaryRepo.appendChild(el("option", {
+    text: "すべてのリポジトリ", attrs: { value: "" },
+  }));
+  for (const repo of repos) {
+    summaryRepo.appendChild(el("option", { text: repo, attrs: { value: repo } }));
+  }
+  summaryRepo.value = repos.includes(current) ? current : "";
+}
+
+function updatePager(shown) {
+  if (!summaryTotal) {
+    summaryStatus.textContent = "0 件";
+    summaryPager.classList.add("hidden");
+    return;
+  }
+  const from = summaryOffset + 1;
+  const to = summaryOffset + shown;
+  summaryStatus.textContent = `${summaryTotal} 件`;
+  summaryRange.textContent = `${from}–${to} / ${summaryTotal}`;
+  summaryPrev.disabled = summaryOffset === 0;
+  summaryNext.disabled = summaryOffset + PAGE_SIZE >= summaryTotal;
+  summaryPager.classList.toggle("hidden", summaryTotal <= PAGE_SIZE);
+}
+
 function renderSummary(entries) {
   summaryList.textContent = "";
   for (const e of entries) {
     const heading = el("h3", {}, [
       el("a", {
-        href: e.url, text: `${e.repo} #${e.pr_num} — ${e.title}`,
+        href: e.url, text: `${e.repo} #${e.pr_num}` + (e.title ? ` \u2014 ${e.title}` : ""),
         attrs: { target: "_blank", rel: "noopener" },
       }),
     ]);
-    const meta = el("div", { class: "meta", text: `${e.mtime}（rev-${e.rev}）` });
-
-    // 一覧性を優先し、レビュー結果は折りたたんで表示する。
-    const reviewDetails = el("details", {}, [
-      el("summary", { text: "レビュー結果を表示" }),
-      el("pre", { class: "code", text: e.review_text }),
-    ]);
-
-    const children = [heading, meta, reviewDetails];
-    if (e.details) {
-      children.push(el("details", {}, [
-        el("summary", { text: "詳細情報" }),
-        el("pre", { class: "code", text: e.details }),
-      ]));
+    const bits = [fmtTime(e.created_at), `rev-${e.rev}`];
+    if (e.model) {
+      bits.push(e.reasoning_effort ? `${e.model} (${e.reasoning_effort})` : e.model);
     }
+    bits.push(fmtBytes(e.body_bytes));
+    const meta = el("div", { class: "meta", text: bits.join(" / ") });
+
+    const children = [heading, meta, buildSummaryDetails(e)];
     summaryList.appendChild(el("div", { class: "summary-item" }, children));
   }
   if (!entries.length) {
-    summaryList.appendChild(el("p", { class: "empty", text: "集計対象のレビューはありません。" }));
+    summaryList.appendChild(el("p", {
+      class: "empty",
+      text: "該当するレビューはありません。",
+    }));
   }
+}
+
+function buildSummaryDetails(entry) {
+  const reviewPre = el("pre", { class: "code", text: "開くと読み込みます..." });
+  const reviewDetails = el("details", {}, [
+    el("summary", { text: "レビュー結果を表示" }), reviewPre,
+  ]);
+  const detailsPre = el("pre", { class: "code" });
+  const detailsBox = el("details", { class: "hidden" }, [
+    el("summary", { text: "詳細情報" }), detailsPre,
+  ]);
+
+  let loaded = false;
+  reviewDetails.addEventListener("toggle", async () => {
+    if (!reviewDetails.open || loaded) return;
+    loaded = true;
+    try {
+      const d = await fetchJSON(`/api/summary/${entry.id}`);
+      reviewPre.textContent = d.review_text || "(空)";
+      if (d.details) {
+        detailsPre.textContent = d.details;
+        detailsBox.classList.remove("hidden");
+      }
+    } catch (err) {
+      loaded = false;
+      reviewPre.textContent = err.message;
+    }
+  });
+
+  return el("div", {}, [reviewDetails, detailsBox]);
 }
 
 // ---- ポーリング開始 --------------------------------------------------------

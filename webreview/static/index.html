@@ -44,12 +44,23 @@
   </section>
 
   <!-- ===== 集計タブ ===== -->
+  <!-- 一覧はメタデータのみを取得し、レビュー本文は開かれた行だけ個別に読み込む -->
   <section id="tab-summary" class="tab-panel">
     <div class="form-row">
-      <button id="reload-summary">集計を更新</button>
-      <span id="summary-status" class="meta"></span>
+      <select id="summary-repo" aria-label="リポジトリで絞り込む">
+        <option value="">すべてのリポジトリ</option>
+      </select>
+      <input type="search" id="summary-q" placeholder="レビュー本文を検索"
+             autocomplete="off">
+      <button id="reload-summary">更新</button>
     </div>
+    <p id="summary-status" class="meta"></p>
     <div id="summary-list" class="summary-list"></div>
+    <div class="form-row pager hidden" id="summary-pager">
+      <button id="summary-prev" type="button">← 前</button>
+      <span id="summary-range" class="meta"></span>
+      <button id="summary-next" type="button">次 →</button>
+    </div>
   </section>
 
   <script src="/static/app.js"></script>
