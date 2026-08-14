@@ -214,7 +214,10 @@ def header_line(review: Review) -> str:
     以前はこの文字列をログファイルに書き込んでいたため本文と混ざり、書式を変えると
     過去分と食い違っていた。カラムから毎回組み立てるので書式変更が過去分にも及ぶ。
     """
-    parts = [review.model or "unknown"]
+    parts = []
+    # 初期のログには実行時設定の記録が無い。分からないものは書かずに省く。
+    if review.model:
+        parts.append(review.model)
     if review.reasoning_effort:
         parts.append(f"reasoning={review.reasoning_effort}")
     parts.append(f"rev-{review.rev}")
