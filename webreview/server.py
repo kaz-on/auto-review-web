@@ -169,8 +169,8 @@ def create_app() -> Flask:
         repo = (request.args.get("repo") or "").strip() or None
         q = (request.args.get("q") or "").strip() or None
 
-        # 未取得・失効ぶんのタイトルを少しずつ埋める (1 回の応答を待たせすぎない)。
-        reviews.refresh_titles()
+        # 未取得・失効ぶんのタイトルは裏で埋める (この応答は待たせない)。
+        reviews.refresh_titles_async()
 
         return jsonify({
             "entries": reviews.list_summary(limit=limit, offset=offset, repo=repo, q=q),

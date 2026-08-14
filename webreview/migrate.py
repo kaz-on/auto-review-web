@@ -140,7 +140,7 @@ def _import_reviews(root: Path, rep: Report) -> dict[tuple[str, int, int], int]:
             err_file = err_file.with_suffix(err_file.suffix + ".gz")
 
         details, fields = ("", {})
-        if err_file.exists() and err_file.suffix != ".gz":
+        if err_file.exists():
             details, fields = review.read_err_header(err_file)
 
         model = fields.get("model")

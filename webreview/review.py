@@ -221,8 +221,14 @@ def read_err_header(err_path: Path, max_lines: int = 200) -> tuple[str, dict[str
     """
     lines: list[str] = []
     fields: dict[str, str] = {}
+    # 実行直後は平文、保存後は gzip。どちらも先頭だけ読めればよい。
+    opener = (
+        (lambda: gzip.open(err_path, "rt", encoding="utf-8", errors="replace"))
+        if err_path.suffix == ".gz"
+        else (lambda: err_path.open(encoding="utf-8", errors="replace"))
+    )
     try:
-        with err_path.open(encoding="utf-8", errors="replace") as f:
+        with opener() as f:
             for line in f:
                 line = line.rstrip("\n")
                 if line == "exec":
@@ -238,7 +244,7 @@ def read_err_header(err_path: Path, max_lines: int = 200) -> tuple[str, dict[str
                 key, sep, value = line.partition(":")
                 if sep and key in _BANNER_FIELDS:
                     fields[_BANNER_FIELDS[key]] = value.strip()
-    except OSError:
+    except (OSError, gzip.BadGzipFile):
         return "", {}
     return "\n".join(lines), fields
 

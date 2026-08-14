@@ -11,6 +11,7 @@ err ログを読まない。
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,10 @@ from .errors import ReviewError
 
 # PR タイトルの再取得間隔。PR 名は変更されうるので恒久キャッシュにはしない。
 TITLE_TTL_SECONDS = 24 * 60 * 60
+
+# タイトル取り直しの多重起動を防ぐ。
+_REFRESH_LOCK = threading.Lock()
+_refreshing = False
 
 # 一覧の既定件数。
 DEFAULT_LIMIT = 50
@@ -255,11 +260,35 @@ def put_title(repo: str, pr_number: int, title: str) -> None:
         )
 
 
+def refresh_titles_async(limit: int = 20) -> None:
+    """タイトルの取り直しをバックグラウンドで走らせる。
+
+    GitHub API は 1 件ずつ順に叩くため、集計リクエストの中で待つと表示が数秒
+    止まりうる。取得できなかったぶんは前回の値のまま表示し、次に開いたときに
+    反映されればよい。多重起動は避ける (集計は連続で開かれることがある)。
+    """
+    global _refreshing
+    with _REFRESH_LOCK:
+        if _refreshing:
+            return
+        _refreshing = True
+
+    def worker() -> None:
+        global _refreshing
+        try:
+            refresh_titles(limit)
+        finally:
+            with _REFRESH_LOCK:
+                _refreshing = False
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def refresh_titles(limit: int = 20) -> int:
     """タイトル未取得・失効ぶんを GitHub から取り直す。取得できた件数を返す。
 
-    集計の表示を止めないよう、1 回あたりの取得数に上限を設ける。認証未設定や
-    削除された PR で失敗しても集計自体は成立させる。
+    1 回あたりの取得数に上限を設ける。認証未設定や削除された PR で失敗しても
+    集計自体は成立させる。
     """
     cutoff = time.time() - TITLE_TTL_SECONDS
     rows = db.connect().execute(
