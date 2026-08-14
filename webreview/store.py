@@ -1,27 +1,48 @@
-"""レビュージョブの状態管理と永続化。
+"""レビュージョブの状態管理。SQLite に永続化する。
 
-スレッドセーフ。Web リクエストスレッドとワーカースレッドの両方から使われる。
-ジョブは JSON ファイルに永続化し、サーバ再起動後も履歴と投稿状態を保持する。
+Web リクエストスレッドとワーカースレッドの両方から使われるが、排他は SQLite に
+任せる (db モジュールの WAL + busy_timeout)。以前はジョブ全件を 1 つの JSON に
+書き出していたため進捗 1 行ごとに全体を再シリアライズしていたが、進捗は
+job_progress への 1 行 INSERT になった。
+
 再起動時に未完了 (queued/running) だったジョブは中断扱いにする。
 """
 
 from __future__ import annotations
 
-import json
-import threading
+import sqlite3
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import config
+from . import db
 
 # ジョブのステータス
 QUEUED = "queued"
 RUNNING = "running"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
+
+_ACTIVE = (QUEUED, RUNNING)
+
+# update() で書き換えを許すカラム (列名を SQL に直接埋めるため固定集合で縛る)。
+_UPDATABLE = frozenset({
+    "status", "started_at", "finished_at", "error", "auto_post",
+    "posted", "posting", "post_error", "review_id",
+})
+
+# ジョブ本体と、表示のために reviews / pr_titles から引く派生項目。
+_SELECT = """
+SELECT j.*,
+       t.title  AS pr_title,
+       r.rev    AS rev,
+       r.base_ref AS base_ref,
+       (SELECT COUNT(*) FROM job_progress p WHERE p.job_id = j.id) AS progress_count
+  FROM jobs j
+  LEFT JOIN pr_titles t ON t.repo = j.repo AND t.pr_number = j.number
+  LEFT JOIN reviews   r ON r.id = j.review_id
+"""
 
 
 @dataclass
@@ -31,125 +52,174 @@ class Job:
     owner: str
     repo: str
     number: int
-    status: str = QUEUED
-    created_at: float = field(default_factory=time.time)
+    status: str
+    created_at: float
     started_at: float | None = None
     finished_at: float | None = None
-    progress: list[str] = field(default_factory=list)
     error: str | None = None
-    # レビュー完了後に自動で PR へ投稿するか。
     auto_post: bool = True
-    # レビュー成功時のメタ情報 (レビュー本文はファイルから都度読み出す)
-    base_ref: str | None = None
-    pr_title: str | None = None
-    rev: int | None = None
-    stdout_path: str | None = None
-    stderr_path: str | None = None
-    # PR への投稿状態
     posted: bool = False
     posting: bool = False
     post_error: str | None = None
+    # 成功時に生成されたレビュー (reviews.id)。
+    review_id: int | None = None
+    # --- 派生項目 (join で埋める。DB 上は jobs に持たない) ---
+    pr_title: str | None = None
+    rev: int | None = None
+    base_ref: str | None = None
+    progress_count: int = 0
+    # 未取得なら None。空リストは「取得したが 0 件」を意味する。
+    progress: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-class JobStore:
-    def __init__(self, path: Path):
-        self._path = path
-        self._lock = threading.RLock()
-        self._jobs: dict[str, Job] = {}
-        self._load()
+def _row_to_job(row: Any, progress: list[str] | None = None) -> Job:
+    return Job(
+        id=row["id"],
+        url=row["url"],
+        owner=row["owner"],
+        repo=row["repo"],
+        number=row["number"],
+        status=row["status"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        error=row["error"],
+        auto_post=bool(row["auto_post"]),
+        posted=bool(row["posted"]),
+        posting=bool(row["posting"]),
+        post_error=row["post_error"],
+        review_id=row["review_id"],
+        pr_title=row["pr_title"],
+        rev=row["rev"],
+        base_ref=row["base_ref"],
+        progress_count=row["progress_count"],
+        progress=progress,
+    )
 
-    # --- 永続化 -------------------------------------------------------------
-    def _load(self) -> None:
-        if not self._path.exists():
-            return
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return
-        for item in raw:
-            try:
-                job = Job(**item)
-            except TypeError:
-                continue
-            # 前回実行で未完了だったジョブは中断扱い。
-            if job.status in (QUEUED, RUNNING):
-                job.status = FAILED
-                job.error = "サーバの再起動により中断されました。"
-                job.finished_at = job.finished_at or time.time()
-            job.posting = False
-            self._jobs[job.id] = job
 
-    def _persist_locked(self) -> None:
-        data = [j.to_dict() for j in self._jobs.values()]
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self._path)
+def _progress_for(job_ids: list[str]) -> dict[str, list[str]]:
+    if not job_ids:
+        return {}
+    marks = ",".join("?" * len(job_ids))
+    rows = db.connect().execute(
+        f"SELECT job_id, line FROM job_progress "
+        f"WHERE job_id IN ({marks}) ORDER BY job_id, seq",
+        job_ids,
+    ).fetchall()
+    out: dict[str, list[str]] = {jid: [] for jid in job_ids}
+    for row in rows:
+        out[row["job_id"]].append(row["line"])
+    return out
 
-    # --- 参照 ---------------------------------------------------------------
-    def get(self, job_id: str) -> Job | None:
-        with self._lock:
-            return self._jobs.get(job_id)
 
-    def list(self) -> list[Job]:
-        """新しい順にジョブを返す。"""
-        with self._lock:
-            return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+# --- 起動時の後始末 ---------------------------------------------------------
+def recover_interrupted() -> int:
+    """前回実行で未完了だったジョブを中断扱いにする。件数を返す。"""
+    now = time.time()
+    with db.write() as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = ?, error = ?, "
+            "finished_at = COALESCE(finished_at, ?) "
+            "WHERE status IN (?, ?)",
+            (FAILED, "サーバの再起動により中断されました。", now, QUEUED, RUNNING),
+        )
+        interrupted = cur.rowcount
+        # 投稿中フラグはプロセスと運命を共にするので必ず落とす。
+        conn.execute("UPDATE jobs SET posting = 0 WHERE posting = 1")
+    return interrupted
 
-    def has_active(self) -> bool:
-        """実行中または待機中のジョブがあるか。"""
-        with self._lock:
-            return any(j.status in (QUEUED, RUNNING) for j in self._jobs.values())
 
-    # --- 更新 ---------------------------------------------------------------
-    def create(
-        self, url: str, owner: str, repo: str, number: int, auto_post: bool = True
-    ) -> Job:
-        with self._lock:
-            job = Job(
-                id=uuid.uuid4().hex[:12],
-                url=url,
-                owner=owner,
-                repo=repo,
-                number=number,
-                auto_post=auto_post,
+# --- 参照 -------------------------------------------------------------------
+def get(job_id: str, with_progress: bool = True) -> Job | None:
+    row = db.connect().execute(_SELECT + " WHERE j.id = ?", (job_id,)).fetchone()
+    if row is None:
+        return None
+    progress = _progress_for([job_id])[job_id] if with_progress else None
+    return _row_to_job(row, progress)
+
+
+def list_jobs() -> list[Job]:
+    """新しい順にジョブを返す。
+
+    進捗の全文は実行中・待機中のジョブにだけ載せる。終了したジョブの進捗は
+    変化しないうえ件数とともに際限なく増えるため、必要になった時点で
+    get() から取得する (一覧は 2 秒間隔でポーリングされる)。
+    """
+    rows = db.connect().execute(_SELECT + " ORDER BY j.created_at DESC").fetchall()
+    active_ids = [r["id"] for r in rows if r["status"] in _ACTIVE]
+    progress = _progress_for(active_ids)
+    return [_row_to_job(r, progress.get(r["id"])) for r in rows]
+
+
+def has_active() -> bool:
+    row = db.connect().execute(
+        "SELECT 1 FROM jobs WHERE status IN (?, ?) LIMIT 1", _ACTIVE
+    ).fetchone()
+    return row is not None
+
+
+# --- 更新 -------------------------------------------------------------------
+def create(
+    url: str, owner: str, repo: str, number: int, auto_post: bool = True
+) -> Job:
+    job_id = uuid.uuid4().hex[:12]
+    now = time.time()
+    with db.write() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, url, owner, repo, number, status, created_at, "
+            "auto_post) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, url, owner, repo, number, QUEUED, now, int(auto_post)),
+        )
+    job = get(job_id)
+    assert job is not None
+    return job
+
+
+def delete(job_id: str) -> bool:
+    """終了済み (succeeded/failed) のジョブを履歴から削除する。
+
+    レビュー本体 (reviews) は消さない。集計タブからは引き続き参照できる。
+    進捗は外部キーの CASCADE で一緒に消える。
+    """
+    with db.write() as conn:
+        cur = conn.execute(
+            "DELETE FROM jobs WHERE id = ? AND status NOT IN (?, ?)",
+            (job_id, QUEUED, RUNNING),
+        )
+        return cur.rowcount > 0
+
+
+def update(job_id: str, **fields: Any) -> Job | None:
+    unknown = set(fields) - _UPDATABLE
+    if unknown:
+        raise ValueError(f"更新できないカラムです: {sorted(unknown)}")
+    if not fields:
+        return get(job_id)
+
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    values: list[Any] = [
+        int(v) if isinstance(v, bool) else v for v in fields.values()
+    ]
+    values.append(job_id)
+    with db.write() as conn:
+        cur = conn.execute(f"UPDATE jobs SET {assignments} WHERE id = ?", values)
+        if cur.rowcount == 0:
+            return None
+    return get(job_id)
+
+
+def append_progress(job_id: str, line: str) -> None:
+    try:
+        with db.write() as conn:
+            conn.execute(
+                "INSERT INTO job_progress (job_id, seq, at, line) VALUES "
+                "(?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM job_progress "
+                "WHERE job_id = ?), ?, ?)",
+                (job_id, job_id, time.time(), line),
             )
-            self._jobs[job.id] = job
-            self._persist_locked()
-            return job
-
-    def delete(self, job_id: str) -> bool:
-        """終了済み (succeeded/failed) のジョブを履歴から削除する。"""
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                return False
-            if job.status in (QUEUED, RUNNING):
-                return False
-            del self._jobs[job_id]
-            self._persist_locked()
-            return True
-
-    def update(self, job_id: str, **fields: Any) -> Job | None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                return None
-            for key, value in fields.items():
-                setattr(job, key, value)
-            self._persist_locked()
-            return job
-
-    def append_progress(self, job_id: str, line: str) -> None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                return
-            job.progress.append(line)
-            self._persist_locked()
-
-
-# アプリ全体で共有する単一のストア。
-store = JobStore(config.JOBS_FILE)
+    except sqlite3.IntegrityError:
+        # 実行中にジョブが消された場合。進捗の取りこぼしで実行を止める必要はない。
+        return
