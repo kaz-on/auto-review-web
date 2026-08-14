@@ -1,7 +1,8 @@
 """設定値。環境変数で上書き可能。
 
-既存スクリプト (auto_review.sh / list_review.sh) と同じ既定値を採用し、
-ログのファイル名レイアウトも互換に保つ。
+状態 (ジョブ・レビュー本文・PR タイトル) は SQLite に保存する。ディスク上に残る
+ファイルは git のクローンと codex の生ログ (err) だけで、後者はアプリからは
+書きっぱなしの診断用ログとして扱う (圧縮・期限削除の対象)。
 """
 
 from __future__ import annotations
@@ -62,16 +63,27 @@ GITHUB_TOKEN_REFRESH_MARGIN = int(os.environ.get("GITHUB_TOKEN_REFRESH_MARGIN", 
 # リポジトリをクローンする作業ディレクトリ。
 WORK_PATH = _env_path("REVIEW_WORK_PATH", BASE_DIR / "data" / "work")
 
-# レビューログのルート。list_review.sh の ROOT_DIR="review_logs" に相当。
+# codex の生ログ (err) を置くルート。レビュー本文は DB に入るのでここには残らない。
 LOGS_PATH = _env_path("REVIEW_LOGS_PATH", BASE_DIR / "data" / "review_logs")
 
-# ジョブ履歴の永続化先 (再起動しても投稿済みなどの状態を保持するため)。
-JOBS_FILE = _env_path("REVIEW_JOBS_FILE", BASE_DIR / "data" / "jobs.json")
+# 状態の保存先。ジョブ・進捗・レビュー本文・PR タイトルをすべてここに持つ。
+DB_PATH = _env_path("REVIEW_DB_PATH", BASE_DIR / "data" / "review.db")
+
+
+# --- ログの保持 --------------------------------------------------------------
+# codex の err ログは PR の差分規模に比例して伸びるため、完了時に gzip し、
+# 一定期間で削除する。本文と詳細は DB にあるので、消えても画面表示は変わらない。
+# 0 を指定すると削除しない。
+STDERR_RETENTION_DAYS = int(os.environ.get("REVIEW_STDERR_RETENTION_DAYS", "30"))
 
 
 # --- 外部コマンド ------------------------------------------------------------
 GIT_BIN = os.environ.get("REVIEW_GIT_BIN", "git")
 CODEX_BIN = os.environ.get("REVIEW_CODEX_BIN", "codex")
+
+# codex の実行が固まるとワーカーが 1 つしかない都合でキュー全体が止まるため、
+# 上限時間を設ける (秒)。0 で無制限。
+REVIEW_TIMEOUT = int(os.environ.get("REVIEW_TIMEOUT", "3600"))
 
 
 # --- サーバ ------------------------------------------------------------------
@@ -83,4 +95,4 @@ def ensure_dirs() -> None:
     """必要なディレクトリを作成する。"""
     WORK_PATH.mkdir(parents=True, exist_ok=True)
     LOGS_PATH.mkdir(parents=True, exist_ok=True)
-    JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
