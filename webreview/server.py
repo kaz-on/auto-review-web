@@ -7,7 +7,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import config, db, github_auth, migrate, reviews, store
+from . import config, db, github_auth, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -53,16 +53,6 @@ def _int_arg(name: str, default: int) -> int:
 def create_app() -> Flask:
     config.ensure_dirs()
     db.init()
-
-    # 初回起動時だけ、ファイル保持だった頃のデータを取り込む。取り込み済みの
-    # 環境では走らない。手動で確認したい場合は python -m webreview.migrate。
-    if migrate.needed():
-        report = migrate.run()
-        # 新規インストールでは取り込むものが無いので、何かあったときだけ報告する。
-        if report.reviews_imported or report.jobs_imported or report.titles_imported:
-            print("[info] 既存のレビューログを取り込みました:", flush=True)
-            for line in report.lines():
-                print(f"[info] {line}", flush=True)
 
     interrupted = store.recover_interrupted()
     if interrupted:

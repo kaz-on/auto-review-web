@@ -187,7 +187,6 @@ webreview/
   review.py      レビューの実行と投稿（codex / git の駆動）
   store.py       ジョブ状態の管理
   reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ
-  migrate.py     ファイル保持だった頃のデータの取り込み
   worker.py      単一ワーカーによる直列実行キュー
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
@@ -230,16 +229,6 @@ codex の 2 つの出力は性質が違うため扱いを分けている。
 レビュー本文の先頭に出る `codex review (モデル, reasoning=..., rev-N):` は、
 保存された本文には含まれない。モデル名などはカラムとして持ち、表示・投稿の
 たびに組み立てる。
-
-### 旧データの取り込み
-
-初回起動時に、`REVIEW_LOGS_PATH` 配下の旧ログ・`jobs.json`・`pr_titles.json` を
-自動で DB に取り込む（取り込み済みの環境では走らない）。手動で実行・確認したい
-場合は次のとおり。再実行しても二重登録されない。
-
-```bash
-python -m webreview.migrate
-```
 
 ## 対話部分の置き換え
 

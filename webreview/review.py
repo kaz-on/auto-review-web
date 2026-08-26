@@ -1,7 +1,6 @@
-"""auto_review.sh を非対話的に実行するためのモジュール。
+"""レビューの実行と投稿。codex と git を駆動する。
 
-Web からの呼び出しで人手の確認 (y/N) を挟めないため、元スクリプトの対話部分は
-次のように置き換える:
+Web からの呼び出しでは人手の確認 (y/N) を挟めないため、次のように扱う:
 
 * ログの世代 (rev) が既に存在する場合 → 確認せず新しい rev を自動採番する。
 * codex レビューの実行確認 → 常に実行する (ジョブ投入=実行の意思とみなす)。
@@ -221,14 +220,8 @@ def read_err_header(err_path: Path, max_lines: int = 200) -> tuple[str, dict[str
     """
     lines: list[str] = []
     fields: dict[str, str] = {}
-    # 実行直後は平文、保存後は gzip。どちらも先頭だけ読めればよい。
-    opener = (
-        (lambda: gzip.open(err_path, "rt", encoding="utf-8", errors="replace"))
-        if err_path.suffix == ".gz"
-        else (lambda: err_path.open(encoding="utf-8", errors="replace"))
-    )
     try:
-        with opener() as f:
+        with err_path.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.rstrip("\n")
                 if line == "exec":
@@ -244,7 +237,7 @@ def read_err_header(err_path: Path, max_lines: int = 200) -> tuple[str, dict[str
                 key, sep, value = line.partition(":")
                 if sep and key in _BANNER_FIELDS:
                     fields[_BANNER_FIELDS[key]] = value.strip()
-    except (OSError, gzip.BadGzipFile):
+    except OSError:
         return "", {}
     return "\n".join(lines), fields
 
