@@ -234,10 +234,28 @@ def test_応答が_pr_の形でなければ実行しない(capture_requests):
 def test_レビューをコメントとして投稿する(capture_requests):
     sent, _ = capture_requests
 
-    github_api.create_review_comment(
+    github_api.create_review(
         FakeProvider("t"), "example-org", "my-repo", 42, "レビュー本文"
     )
 
     req = sent[0]
     assert req.full_url.endswith("/repos/example-org/my-repo/pulls/42/reviews")
+    # 任意の項目は指定が無ければ送らない (GitHub 側の既定に任せる)。
     assert json.loads(req.data) == {"event": "COMMENT", "body": "レビュー本文"}
+
+
+def test_行コメントとレビュー対象のコミットを添えて投稿する(capture_requests):
+    sent, _ = capture_requests
+    comments = [{"path": "a.py", "line": 16, "side": "RIGHT", "body": "指摘"}]
+
+    github_api.create_review(
+        FakeProvider("t"), "example-org", "my-repo", 42, "レビュー本文",
+        comments=comments, commit_id="deadbeef",
+    )
+
+    assert json.loads(sent[0].data) == {
+        "event": "COMMENT",
+        "body": "レビュー本文",
+        "commit_id": "deadbeef",
+        "comments": comments,
+    }

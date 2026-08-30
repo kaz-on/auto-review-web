@@ -160,24 +160,115 @@ def test_pr_の情報が取れなければ_git_にも触らない(monkeypatch, s
 
 
 # --- 投稿 -------------------------------------------------------------------
-def test_投稿ではヘッダ付きの本文を送る(monkeypatch):
-    posted: list[tuple] = []
+@pytest.fixture
+def capture_post(monkeypatch):
+    """create_review の呼び出しを記録する。errors に積むと順に失敗させられる。"""
+    calls: list[dict] = []
+    errors: list[Exception] = []
+
     monkeypatch.setattr(github_auth, "get_provider", lambda: object())
-    monkeypatch.setattr(
-        github_api, "create_review_comment",
-        lambda provider, owner, repo, number, body: posted.append(
-            (owner, repo, number, body)
+
+    def fake_create_review(
+        provider, owner, repo, number, body, *, comments=None, commit_id=None
+    ):
+        calls.append({
+            "target": (owner, repo, number),
+            "body": body,
+            "comments": comments,
+            "commit_id": commit_id,
+        })
+        if errors:
+            raise errors.pop(0)
+
+    monkeypatch.setattr(github_api, "create_review", fake_create_review)
+    return calls, errors
+
+
+def _review_with_findings(work):
+    """位置の読める指摘を 1 件持つレビューを作る。"""
+    return reviews.create(
+        repo=PR.repo,
+        pr_number=PR.number,
+        body=(
+            "全体の要約。\n\n"
+            "Full review comments:\n\n"
+            f"- [P1] 指摘 — {work / PR.repo / 'order.py'}:16-16\n"
+            "  説明。\n"
         ),
+        head_commit="headcommit5678",
+        model="m",
     )
+
+
+def test_位置の読める指摘はソース行へのコメントにする(capture_post, temp_paths):
+    calls, _ = capture_post
+    work, _ = temp_paths
+    created = _review_with_findings(work)
+    lines: list[str] = []
+
+    review.post_review(PR, created.id, progress=lines.append)
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["target"] == ("example-org", "my-repo", 7)
+    # 本文にはヘッダと要約だけが残り、指摘は行コメントへ回る。
+    assert call["body"] == "codex review (m, rev-0):\n\n全体の要約。"
+    assert call["comments"] == [{
+        "path": "order.py",
+        "line": 16,
+        "side": "RIGHT",
+        "body": "**[P1] 指摘**\n\n説明。",
+    }]
+    # レビューした版に紐付ける。
+    assert call["commit_id"] == "headcommit5678"
+    assert any("ソース行" in line for line in lines)
+
+
+def test_位置が読めなければヘッダ付きの本文だけを送る(capture_post):
+    calls, _ = capture_post
     created = reviews.create(
         repo=PR.repo, pr_number=PR.number, body="## 指摘", model="m"
     )
 
     review.post_review(PR, created.id)
 
-    assert posted == [
-        ("example-org", "my-repo", 7, "codex review (m, rev-0):\n\n## 指摘")
-    ]
+    assert calls == [{
+        "target": ("example-org", "my-repo", 7),
+        "body": "codex review (m, rev-0):\n\n## 指摘",
+        "comments": None,
+        "commit_id": None,
+    }]
+
+
+def test_行コメントが弾かれたら本文にまとめて投稿し直す(capture_post, temp_paths):
+    """差分に無い行を指した (422) だけで投稿を諦めない。"""
+    calls, errors = capture_post
+    work, _ = temp_paths
+    errors.append(github_api.ApiError("Path could not be resolved", status=422))
+    created = _review_with_findings(work)
+    lines: list[str] = []
+
+    review.post_review(PR, created.id, progress=lines.append)
+
+    assert len(calls) == 2
+    # 2 回目は行コメントを付けず、指摘を含んだ本文をそのまま送る。
+    assert calls[1]["comments"] is None
+    assert "[P1] 指摘" in calls[1]["body"]
+    # レビュー後に PR が更新されていると commit_id 自体が 422 の原因になりうる。
+    assert calls[1]["commit_id"] is None
+    assert any("投稿し直します" in line for line in lines)
+
+
+def test_422_以外の失敗は投稿の失敗として伝える(capture_post, temp_paths):
+    calls, errors = capture_post
+    work, _ = temp_paths
+    errors.append(github_api.ApiError("Not Found", status=404))
+    created = _review_with_findings(work)
+
+    with pytest.raises(ReviewError, match="Not Found"):
+        review.post_review(PR, created.id)
+
+    assert len(calls) == 1
 
 
 def test_存在しないレビューは投稿しない():

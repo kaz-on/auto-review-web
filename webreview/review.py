@@ -5,6 +5,7 @@
 * ログの世代 (rev) が既に存在する場合は、新しい rev を自動採番する。
 * レビューはジョブ投入をもって実行する (投入=実行の意思とみなす)。
 * PR への投稿は Web UI 上の「投稿」操作で明示的に行う (post_review)。
+* 行コメントを GitHub が解決できなくても、本文だけの投稿に落として先へ進む。
 
 git の作業ツリーは毎回 PR のコミットへ checkout --force + clean するため、前回実行の
 残骸があっても復帰できる。単一ワーカーで直列実行される前提なので、共有の
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import config, github_api, github_auth, reviews
+from . import config, findings, github_api, github_auth, reviews
 from .errors import ReviewError
 
 ProgressFn = Callable[[str], None]
@@ -480,6 +481,11 @@ def post_review(
 ) -> None:
     """レビュー結果を PR にコメントとして投稿する。
 
+    位置の読み取れた指摘はソース行へのコメントにし、残り (全体の要約や書式の
+    読めなかったぶん) をレビュー本体の本文にする。GitHub が位置を解決できないと
+    レビューごと 422 で弾かれるため、そのときは本文にまとめて投稿し直す。
+    指摘の内容はどちらの経路でも PR に残る。
+
     REST API でリポジトリを明示して投稿するため、作業ディレクトリの git 状態には
     依存しない (別のレビューが実行中でも安全に投稿できる)。レビュー完了から時間が
     経ってから呼ばれることもあるが、トークンはこの時点で取り直される。
@@ -489,8 +495,30 @@ def post_review(
     if review is None:
         raise ReviewError(f"レビューが見つかりません: id={review_id}")
 
-    progress(f"PR #{pr.number} にレビューを投稿します...")
-    github_api.create_review_comment(
+    summary, found = findings.extract(review.body, config.WORK_PATH / pr.repo)
+    comments = [f.comment() for f in found]
+
+    if comments:
+        progress(
+            f"PR #{pr.number} にレビューを投稿します "
+            f"({len(comments)} 件をソース行へのコメントにします)..."
+        )
+        posted = _post_with_comments(
+            pr,
+            f"{reviews.header_line(review)}\n\n{summary}".rstrip(),
+            comments,
+            review.head_commit,
+        )
+        if posted:
+            progress("投稿が完了しました。")
+            return
+        progress("行コメントを解決できなかったため、本文にまとめて投稿し直します。")
+    else:
+        progress(f"PR #{pr.number} にレビューを投稿します...")
+
+    # 本文だけの投稿では commit_id も渡さない。レビュー後に PR が更新されていると
+    # 「PR に属さない commit_id」自体が 422 の原因になりうるため。
+    github_api.create_review(
         github_auth.get_provider(),
         pr.owner,
         pr.repo,
@@ -498,3 +526,29 @@ def post_review(
         reviews.render_body(review),
     )
     progress("投稿が完了しました。")
+
+
+def _post_with_comments(
+    pr: ParsedPR, body: str, comments: list[dict], commit_id: str | None
+) -> bool:
+    """行コメント付きで投稿する。GitHub が位置を解決できなければ False を返す。
+
+    422 は差分に無いパスや行を指したときのもので (エラーは "Path could not be
+    resolved" など)、投稿はまるごと行われていない。本文だけならまだ通るので、
+    呼び出し元で投稿し直す。それ以外の失敗は投稿の失敗として伝える。
+    """
+    try:
+        github_api.create_review(
+            github_auth.get_provider(),
+            pr.owner,
+            pr.repo,
+            pr.number,
+            body,
+            comments=comments,
+            commit_id=commit_id,
+        )
+    except github_api.ApiError as e:
+        if e.status != 422:
+            raise
+        return False
+    return True

@@ -131,13 +131,29 @@ def get_pull(provider: TokenProvider, owner: str, repo: str, number: int) -> Pul
     )
 
 
-def create_review_comment(
-    provider: TokenProvider, owner: str, repo: str, number: int, body: str
+def create_review(
+    provider: TokenProvider,
+    owner: str,
+    repo: str,
+    number: int,
+    body: str,
+    *,
+    comments: list[dict[str, Any]] | None = None,
+    commit_id: str | None = None,
 ) -> None:
-    """PR にコメントレビューを投稿する (gh pr review --comment 相当)。"""
+    """PR にコメントレビューを投稿する (gh pr review --comment 相当)。
+
+    comments を渡すとソース行へのコメントが付く。要素の形は「レビューコメントの
+    作成」API と同じ (path / line / side / body、複数行なら start_line も)。
+    GitHub が位置を解決できないときは 422 になり、レビュー全体が投稿されない。
+
+    commit_id はレビュー対象のコミット。省略すると PR の最新コミットが使われる。
+    """
+    payload: dict[str, Any] = {"event": "COMMENT", "body": body}
+    if commit_id:
+        payload["commit_id"] = commit_id
+    if comments:
+        payload["comments"] = comments
     _request_with_token(
-        provider,
-        "POST",
-        f"/repos/{owner}/{repo}/pulls/{number}/reviews",
-        {"event": "COMMENT", "body": body},
+        provider, "POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", payload
     )
