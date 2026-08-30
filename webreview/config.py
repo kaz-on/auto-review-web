@@ -21,7 +21,8 @@ def _env_path(name: str, default: Path) -> Path:
 
 # --- レビュー対象の制約 ------------------------------------------------------
 # 許可する GitHub Organization。これ以外のリポジトリはレビューできない。
-REVIEW_ORG = os.environ.get("REVIEW_ORG", "your-org")
+# 必須。未設定 (空) のときはどのリポジトリもレビューできない (fail-closed)。
+REVIEW_ORG = os.environ.get("REVIEW_ORG", "").strip()
 
 # codex に渡すレビューモデル。
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-5.6-terra")

@@ -98,6 +98,10 @@ def parse_pr_url(pr_url: str) -> ParsedPR:
         raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
 
     owner, repo, number = m.group(1), m.group(2), int(m.group(3))
+    if not config.REVIEW_ORG:
+        raise ReviewError(
+            "REVIEW_ORG が設定されていません。管理者に連絡してください。"
+        )
     if owner != config.REVIEW_ORG:
         raise ReviewError(
             f"リポジトリの Organization ({owner}) が {config.REVIEW_ORG} ではありません。"

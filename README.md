@@ -67,7 +67,7 @@ Codex CLI はイメージに含まれ、認証は環境変数で渡す
 
 ```bash
 cp .env.example .env
-# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）と CODEX_API_KEY を設定する
+# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、CODEX_API_KEY、REVIEW_ORG を設定する
 docker compose up -d --build
 ```
 
@@ -92,9 +92,13 @@ docker compose up -d --build
 - Python 3.10 以上
 - `git` / `codex`
 
-認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。
+認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。ただし
+`run.sh` は `.env` を読まないため、**必須の環境変数（GitHub 認証・`CODEX_API_KEY`・
+`REVIEW_ORG`）は自分で export しておく**こと。`REVIEW_ORG` が未設定のまま起動すると、
+サーバーは立ち上がるがレビューはすべて拒否される（起動ログに `[warn]` が出る）。
 
 ```bash
+export REVIEW_ORG=<your-org>
 ./run.sh
 ```
 
@@ -131,7 +135,7 @@ python3 -m venv .venv
 | `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_ORG` から自動解決 |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
-| `REVIEW_ORG` | `your-org` | 許可する GitHub Organization |
+| `REVIEW_ORG` | （空） | **必須。** 許可する GitHub Organization |
 | `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
