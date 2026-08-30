@@ -26,6 +26,7 @@ def test_保存した内容がそのまま読み出せる():
         body="## 指摘",
         base_ref="main",
         base_commit="deadbeef",
+        head_commit="cafebabe",
         model="gpt-5.6-terra",
         reasoning_effort="medium",
         codex_version="1.2.3",
@@ -38,6 +39,7 @@ def test_保存した内容がそのまま読み出せる():
     assert got.body == "## 指摘"
     assert got.base_ref == "main"
     assert got.base_commit == "deadbeef"
+    assert got.head_commit == "cafebabe"
     assert got.model == "gpt-5.6-terra"
     assert got.codex_version == "1.2.3"
     assert got.session_id == "0199"

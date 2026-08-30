@@ -297,8 +297,12 @@ def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
 
 def _checkout_pr(
     pr: ParsedPR, repo_path: Path, base_ref: str, progress: ProgressFn
-) -> str:
-    """base と PR の head を取得し、PR のコミットを checkout する。base_commit を返す。
+) -> tuple[str, str]:
+    """base と PR の head を取得し、PR のコミットを checkout する。
+
+    (base_commit, head_commit) を返す。head_commit はレビューしたコミットそのもので、
+    投稿時に行コメントの commit_id として使う (その後 PR が更新されても、レビューが
+    どの版に対するものかがコメントに残る)。
 
     `gh pr checkout` の代わりに refs/pull/<n>/head を直接 fetch する。fork からの PR
     でも同じ手順で扱え、detached HEAD になるが `git diff <base>...HEAD` には支障ない。
@@ -332,7 +336,7 @@ def _checkout_pr(
         [config.GIT_BIN, "submodule", "update", "--init", "--recursive", "--force"],
         cwd=repo_path, progress=progress, env=git_env,
     )
-    return base_commit
+    return base_commit, pr_commit
 
 
 def _build_prompt(pull: github_api.PullRequest, base_commit: str) -> str:
@@ -432,7 +436,7 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> reviews.Revi
     reviews.put_title(pr.repo, pr.number, pull.title)
 
     repo_path = _prepare_repo(pr, progress)
-    base_commit = _checkout_pr(pr, repo_path, pull.base_ref, progress)
+    base_commit, head_commit = _checkout_pr(pr, repo_path, pull.base_ref, progress)
 
     progress("PR のタイトル・本文からプロンプトを組み立てます...")
     prompt = _build_prompt(pull, base_commit)
@@ -458,6 +462,7 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> reviews.Revi
         body=run.body,
         base_ref=pull.base_ref,
         base_commit=base_commit,
+        head_commit=head_commit,
         model=run.model,
         reasoning_effort=run.reasoning_effort,
         codex_version=run.codex_version,

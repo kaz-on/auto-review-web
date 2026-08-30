@@ -56,7 +56,7 @@ def stub_git(monkeypatch, temp_paths):
 
     def fake_checkout(pr, path, base_ref, progress):
         seen["base_ref"] = base_ref
-        return "basecommit1234"
+        return "basecommit1234", "headcommit5678"
 
     monkeypatch.setattr(review, "_prepare_repo", fake_prepare)
     monkeypatch.setattr(review, "_checkout_pr", fake_checkout)
@@ -86,6 +86,8 @@ def test_レビューを最後まで実行して保存する(
     assert result.body == "## 指摘事項\n- 何か"
     assert result.base_ref == "main"
     assert result.base_commit == "basecommit1234"
+    # レビューした版を残しておき、投稿時に行コメントの commit_id として使う。
+    assert result.head_commit == "headcommit5678"
     assert result.model == "gpt-5.6-terra"
     assert result.reasoning_effort == "medium"
     assert result.codex_version == "1.2.3"

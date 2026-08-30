@@ -39,6 +39,7 @@ class Review:
     created_at: float
     base_ref: str | None
     base_commit: str | None
+    head_commit: str | None
     model: str | None
     reasoning_effort: str | None
     codex_version: str | None
@@ -61,6 +62,7 @@ def create(
     body: str,
     base_ref: str | None = None,
     base_commit: str | None = None,
+    head_commit: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
     codex_version: str | None = None,
@@ -85,13 +87,13 @@ def create(
             rev = row[0]
         cur = conn.execute(
             "INSERT INTO reviews (repo, pr_number, rev, created_at, base_ref, "
-            "base_commit, model, reasoning_effort, codex_version, session_id, "
-            "body, details, stderr_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "base_commit, head_commit, model, reasoning_effort, codex_version, "
+            "session_id, body, details, stderr_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 repo, pr_number, rev, created_at or time.time(), base_ref,
-                base_commit, model, reasoning_effort, codex_version, session_id,
-                body, details, stderr_path,
+                base_commit, head_commit, model, reasoning_effort, codex_version,
+                session_id, body, details, stderr_path,
             ),
         )
         review_id = cur.lastrowid

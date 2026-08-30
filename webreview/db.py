@@ -23,7 +23,7 @@ _BUSY_TIMEOUT_MS = 10_000
 
 _local = threading.local()
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reviews (
@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at       REAL    NOT NULL,
     base_ref         TEXT,
     base_commit      TEXT,
+    -- レビューした PR の head。行コメントの commit_id に使う。
+    head_commit      TEXT,
     -- 実行時の codex 設定。以前は本文先頭のヘッダ行に埋め込んでいたが、
     -- 本文を検索可能に保つためカラムへ出した (表示・投稿時に組み立てる)。
     model            TEXT,
@@ -93,6 +95,21 @@ CREATE TABLE IF NOT EXISTS pr_titles (
 """
 
 
+# 後から足した列。CREATE TABLE IF NOT EXISTS は既存のテーブルに列を追加しないため、
+# 足りないぶんだけ ALTER TABLE で補う。列の有無だけを見るので、新規作成の DB でも
+# 途中で失敗した DB でも同じ手順で辻褄が合う (スキーマ全体と同じく再実行できる)。
+_ADDED_COLUMNS = (
+    ("reviews", "head_commit", "TEXT"),
+)
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, decl in _ADDED_COLUMNS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def _configure(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     # WAL はデータベース単位の永続設定だが、接続ごとに実行しても害はない。
@@ -141,8 +158,10 @@ def init() -> None:
             f"({SCHEMA_VERSION}) より新しいため起動できません: {config.DB_PATH}"
         )
     # executescript は暗黙に COMMIT を挟むため、明示トランザクションでは包まない。
-    # CREATE ... IF NOT EXISTS だけなので途中で失敗しても再実行で回復できる。
+    # CREATE ... IF NOT EXISTS と不足列の追加だけなので、途中で失敗しても
+    # 再実行で回復できる。
     conn.executescript(_SCHEMA)
+    _add_missing_columns(conn)
     if current < SCHEMA_VERSION:
         # PRAGMA はプレースホルダを取らないため直接埋め込む (定数なので安全)。
         conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

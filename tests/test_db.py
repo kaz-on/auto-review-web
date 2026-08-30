@@ -58,6 +58,36 @@ def test_接続先が無ければディレクトリごと作る(tmp_path, monkey
         _reset_db_connections()
 
 
+def test_古い_db_には後から足した列を補う(tmp_path, monkeypatch):
+    """CREATE TABLE IF NOT EXISTS は既存のテーブルに列を追加しないため。"""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "review.db")
+    _reset_db_connections()
+    try:
+        conn = db.connect()
+        # head_commit を持たない、列を足す前のスキーマ。
+        conn.execute(
+            "CREATE TABLE reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "repo TEXT NOT NULL, pr_number INTEGER NOT NULL, rev INTEGER NOT NULL, "
+            "created_at REAL NOT NULL, body TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO reviews (repo, pr_number, rev, created_at, body) "
+            "VALUES ('r', 1, 0, 1.0, '既存の本文')"
+        )
+        conn.execute("PRAGMA user_version=1")
+
+        db.init()
+
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
+        assert "head_commit" in columns
+        # 既存の行は消えず、足した列は NULL で埋まる。
+        row = conn.execute("SELECT body, head_commit FROM reviews").fetchone()
+        assert (row["body"], row["head_commit"]) == ("既存の本文", None)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    finally:
+        _reset_db_connections()
+
+
 def test_新しいスキーマの_db_では起動しない(tmp_path, monkeypatch):
     """アプリを巻き戻したときにデータを壊さないための関門。"""
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "review.db")
