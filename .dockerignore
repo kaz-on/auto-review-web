@@ -8,3 +8,6 @@ data
 .env
 secrets
 README.md
+tests
+pytest.ini
+requirements-dev.txt

@@ -192,12 +192,29 @@ webreview/
   worker.py      単一ワーカーによる直列実行キュー
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
+tests/                pytest によるテスト
 run.sh                起動スクリプト（ホスト直接起動用）
 Dockerfile            codex / アプリを含むイメージ定義
 docker-compose.yml    起動定義（volume・環境変数）
 secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 .env.example          docker compose 用の環境変数テンプレート
+requirements-dev.txt  テスト用の追加依存
 ```
+
+## テスト
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest
+```
+
+GitHub API・git・codex はいずれも差し替えるので、ネットワークにも本物の `codex`
+にも触らない（`codex` は代役のスクリプトを起動して確かめる）。`git` が入っていれば
+remote の検証も実行され、無ければその 2 件だけ skip する。
+
+設定 (`config`) は import 時に環境変数から読む定数なので、テストでは
+`monkeypatch.setattr(config, ...)` で差し替える。`data/` は `tests/conftest.py` の
+`isolate_data_paths` が一時ディレクトリへ逃がすため、テストが実データを触ることはない。
 
 ## API
 

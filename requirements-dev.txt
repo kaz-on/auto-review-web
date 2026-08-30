@@ -1,0 +1,3 @@
+# テスト用の依存。実行環境には不要なので requirements.txt とは分けている。
+-r requirements.txt
+pytest>=8.0
