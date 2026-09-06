@@ -516,14 +516,13 @@ def post_review(
     else:
         progress(f"PR #{pr.number} にレビューを投稿します...")
 
-    # 本文だけの投稿では commit_id も渡さない。レビュー後に PR が更新されていると
-    # 「PR に属さない commit_id」自体が 422 の原因になりうるため。
     github_api.create_review(
         github_auth.get_provider(),
         pr.owner,
         pr.repo,
         pr.number,
         reviews.render_body(review),
+        commit_id=review.head_commit,
     )
     progress("投稿が完了しました。")
 

@@ -254,8 +254,8 @@ def test_行コメントが弾かれたら本文にまとめて投稿し直す(c
     # 2 回目は行コメントを付けず、指摘を含んだ本文をそのまま送る。
     assert calls[1]["comments"] is None
     assert "[P1] 指摘" in calls[1]["body"]
-    # レビュー後に PR が更新されていると commit_id 自体が 422 の原因になりうる。
-    assert calls[1]["commit_id"] is None
+    # 2 回目も commit_id を維持する。
+    assert calls[1]["commit_id"] == "headcommit5678"
     assert any("投稿し直します" in line for line in lines)
 
 
