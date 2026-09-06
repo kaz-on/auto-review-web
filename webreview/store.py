@@ -58,6 +58,8 @@ class Job:
     finished_at: float | None = None
     error: str | None = None
     auto_post: bool = True
+    # バグ以外に書き方・品質の改善も指摘対象に含めるか (投入時に決まり、以後変えない)。
+    include_quality: bool = True
     posted: bool = False
     posting: bool = False
     post_error: str | None = None
@@ -88,6 +90,7 @@ def _row_to_job(row: Any, progress: list[str] | None = None) -> Job:
         finished_at=row["finished_at"],
         error=row["error"],
         auto_post=bool(row["auto_post"]),
+        include_quality=bool(row["include_quality"]),
         posted=bool(row["posted"]),
         posting=bool(row["posting"]),
         post_error=row["post_error"],
@@ -163,15 +166,21 @@ def has_active() -> bool:
 
 # --- 更新 -------------------------------------------------------------------
 def create(
-    url: str, owner: str, repo: str, number: int, auto_post: bool = True
+    url: str,
+    owner: str,
+    repo: str,
+    number: int,
+    auto_post: bool = True,
+    include_quality: bool = True,
 ) -> Job:
     job_id = uuid.uuid4().hex[:12]
     now = time.time()
     with db.write() as conn:
         conn.execute(
             "INSERT INTO jobs (id, url, owner, repo, number, status, created_at, "
-            "auto_post) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, url, owner, repo, number, QUEUED, now, int(auto_post)),
+            "auto_post, include_quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, url, owner, repo, number, QUEUED, now, int(auto_post),
+             int(include_quality)),
         )
     job = get(job_id)
     assert job is not None

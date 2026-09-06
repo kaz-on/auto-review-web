@@ -37,6 +37,7 @@ def test_保存した内容がそのまま読み出せる():
     got = reviews.get(review.id)
 
     assert got.body == "## 指摘"
+    assert got.include_quality is False
     assert got.base_ref == "main"
     assert got.base_commit == "deadbeef"
     assert got.head_commit == "cafebabe"
@@ -93,6 +94,12 @@ def test_ヘッダはカラムから毎回組み立てる():
     assert reviews.header_line(review) == (
         "codex review (gpt-5.6-terra, reasoning=medium, rev-0):"
     )
+
+
+def test_品質改善を含めた実行はヘッダで見分けられる():
+    review = _create(model="m", include_quality=True)
+
+    assert reviews.header_line(review) == "codex review (m, quality, rev-0):"
 
 
 def test_実行時設定が残っていない古いレビューでもヘッダを出せる():

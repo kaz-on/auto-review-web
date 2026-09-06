@@ -46,12 +46,15 @@ class Review:
     session_id: str | None
     body: str
     details: str | None
+    include_quality: bool
     stderr_path: str | None
     stderr_pruned_at: float | None
 
 
 def _row_to_review(row: Any) -> Review:
-    return Review(**{k: row[k] for k in Review.__dataclass_fields__})
+    values = {k: row[k] for k in Review.__dataclass_fields__}
+    values["include_quality"] = bool(values["include_quality"])
+    return Review(**values)
 
 
 # --- 書き込み ---------------------------------------------------------------
@@ -68,6 +71,7 @@ def create(
     codex_version: str | None = None,
     session_id: str | None = None,
     details: str | None = None,
+    include_quality: bool = False,
     stderr_path: str | None = None,
     created_at: float | None = None,
     rev: int | None = None,
@@ -88,12 +92,12 @@ def create(
         cur = conn.execute(
             "INSERT INTO reviews (repo, pr_number, rev, created_at, base_ref, "
             "base_commit, head_commit, model, reasoning_effort, codex_version, "
-            "session_id, body, details, stderr_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_id, body, details, include_quality, stderr_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 repo, pr_number, rev, created_at or time.time(), base_ref,
                 base_commit, head_commit, model, reasoning_effort, codex_version,
-                session_id, body, details, stderr_path,
+                session_id, body, details, int(include_quality), stderr_path,
             ),
         )
         review_id = cur.lastrowid
@@ -162,7 +166,8 @@ def list_summary(
     rows = db.connect().execute(
         "SELECT r.id, r.repo, r.pr_number, r.rev, r.created_at, r.model, "
         # LENGTH() は TEXT に対して文字数を返すので、BLOB に落としてバイト数を取る。
-        "r.reasoning_effort, LENGTH(CAST(r.body AS BLOB)) AS body_bytes, "
+        "r.reasoning_effort, r.include_quality, "
+        "LENGTH(CAST(r.body AS BLOB)) AS body_bytes, "
         "(r.details IS NOT NULL) AS has_details, t.title AS title "
         "FROM reviews r "
         "LEFT JOIN pr_titles t ON t.repo = r.repo AND t.pr_number = r.pr_number"
@@ -183,6 +188,7 @@ def list_summary(
             "title": row["title"] or "",
             "model": row["model"],
             "reasoning_effort": row["reasoning_effort"],
+            "include_quality": bool(row["include_quality"]),
             "body_bytes": row["body_bytes"],
             "has_details": bool(row["has_details"]),
         }
@@ -225,6 +231,10 @@ def header_line(review: Review) -> str:
         parts.append(review.model)
     if review.reasoning_effort:
         parts.append(f"reasoning={review.reasoning_effort}")
+    # 品質改善を含めた実行だけ印を付ける。含めないのが codex の既定なので、
+    # 何も書かなければ従来どおりのバグ限定レビューを意味する。
+    if review.include_quality:
+        parts.append("quality")
     parts.append(f"rev-{review.rev}")
     return f"codex review ({', '.join(parts)}):"
 

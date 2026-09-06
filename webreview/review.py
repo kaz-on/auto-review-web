@@ -340,17 +340,62 @@ def _checkout_pr(
     return base_commit, pr_commit
 
 
-def _build_prompt(pull: github_api.PullRequest, base_commit: str) -> str:
+# codex の既定のレビュー指針は「一般的なコード品質の指摘」を明示的に除外している。
+# 品質改善を含めるレビューでは、その除外だけを打ち消し、他の条件 (この変更で入った
+# ものに限る・既存コードの厳密さに合わせる) は残す。ファイルと行範囲を必ず付けさせる
+# のは、findings が行コメントに変換できる書式に揃えるため。
+_QUALITY_PROMPT = """\
+For this review, do not limit findings to correctness bugs. This instruction \
+overrides the default review guidelines where they exclude general code quality \
+concerns and non-blocking issues.
+
+Also report discrete, actionable improvements that the author would likely make \
+before merging, including:
+
+- readability and clarity problems
+- unnecessary complexity
+- misleading or weak naming
+- poor separation of responsibilities
+- duplication introduced by the change
+- maintainability problems
+- API or interface design problems
+- brittle or unnecessarily implementation-coupled tests
+- missing tests for important behavior
+- code that is substantially harder to understand than a simpler equivalent
+
+Treat these as valid findings even when the current behavior is technically correct.
+
+Every other part of the review guidelines still applies: report only issues \
+introduced by this change, not pre-existing ones; match the rigor level of the \
+existing codebase; and anchor each finding to a specific file and line range, as \
+with any other finding. Do not report purely subjective formatting preferences or \
+trivial style nits. Only report an improvement when it is concrete, localized, \
+actionable, and would materially improve the changed code.
+
+Use [P3] for non-blocking quality improvements unless their impact warrants a \
+higher priority. Quality findings must not by themselves make the overall \
+correctness verdict negative.
+"""
+
+
+def _build_prompt(
+    pull: github_api.PullRequest, base_commit: str, include_quality: bool = False
+) -> str:
     base_ref = pull.base_ref
-    prompt = (
+    # 指示はすべて先に置き、PR のタイトル・本文 (作者が書いた文章) は末尾に回す。
+    instructions = (
         f"Review the code changes against the target branch '{base_ref}'. "
         f"The merge target commit for this comparison is {base_commit}. "
         f"Run `git diff {base_commit}...HEAD` to inspect the changes relative to {base_ref}.\n"
-        "Provide prioritized, actionable findings. Write review comments in Japanese.\n\n"
+        "Provide prioritized, actionable findings. Write review comments in Japanese.\n"
+    )
+    if include_quality:
+        instructions += "\n" + _QUALITY_PROMPT
+    return (
+        f"{instructions}\n"
         f"Pull Request Title:\n{pull.title}\n\n"
         f"Pull Request Body:\n<PR_BODY>\n{pull.body}\n</PR_BODY>\n"
     )
-    return prompt
 
 
 def _run_codex(prompt: str, repo_path: Path, err_path: Path) -> CodexRun:
@@ -426,8 +471,17 @@ def _finalize_err_log(tmp_path: Path, pr: ParsedPR, rev: int) -> Path:
     return final
 
 
-def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> reviews.Review:
-    """1 件のレビューを最後まで実行し、DB に登録したレビューを返す。"""
+def run_review(
+    pr: ParsedPR,
+    progress: ProgressFn | None = None,
+    include_quality: bool = False,
+) -> reviews.Review:
+    """1 件のレビューを最後まで実行し、DB に登録したレビューを返す。
+
+    include_quality を立てると、バグ以外に書き方・品質の改善もレビュー対象に含める
+    (プロンプトの違いは _QUALITY_PROMPT を参照)。どちらで実行したかはレビューに
+    記録するので、あとから集計で見分けられる。
+    """
     progress = progress or (lambda _msg: None)
 
     _check_tools()
@@ -440,7 +494,9 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> reviews.Revi
     base_commit, head_commit = _checkout_pr(pr, repo_path, pull.base_ref, progress)
 
     progress("PR のタイトル・本文からプロンプトを組み立てます...")
-    prompt = _build_prompt(pull, base_commit)
+    if include_quality:
+        progress("バグに加えて、書き方・品質の改善も指摘対象に含めます。")
+    prompt = _build_prompt(pull, base_commit, include_quality)
 
     output_dir = config.LOGS_PATH / pr.repo
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -469,6 +525,7 @@ def run_review(pr: ParsedPR, progress: ProgressFn | None = None) -> reviews.Revi
         codex_version=run.codex_version,
         session_id=run.session_id,
         details=run.details,
+        include_quality=include_quality,
     )
     reviews.set_stderr_path(review.id, _finalize_err_log(tmp_path, pr, review.rev))
 

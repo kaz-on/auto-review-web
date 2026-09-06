@@ -23,7 +23,7 @@ _BUSY_TIMEOUT_MS = 10_000
 
 _local = threading.local()
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reviews (
@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS reviews (
     body             TEXT    NOT NULL,
     -- err ログ先頭の実行条件ブロック。集計時に err を開かないよう実行時に抽出する。
     details          TEXT,
+    -- バグ以外の品質改善も指摘対象に含めて実行したか。プロンプトが変わるため、
+    -- 本文を読み比べるときの前提として残す。
+    include_quality  INTEGER NOT NULL DEFAULT 0,
     -- err ログの実体。期限削除したら NULL に戻し pruned_at を立てる。
     stderr_path      TEXT,
     stderr_pruned_at REAL,
@@ -67,6 +70,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at REAL,
     error       TEXT,
     auto_post   INTEGER NOT NULL DEFAULT 1,
+    -- 品質改善も指摘対象に含めるか。既定は API と store.create で決めるため、
+    -- ここの DEFAULT は列を後から足した既存行 (品質指摘なしで実行された) 用。
+    include_quality INTEGER NOT NULL DEFAULT 0,
     posted      INTEGER NOT NULL DEFAULT 0,
     posting     INTEGER NOT NULL DEFAULT 0,
     post_error  TEXT,
@@ -100,6 +106,8 @@ CREATE TABLE IF NOT EXISTS pr_titles (
 # 途中で失敗した DB でも同じ手順で辻褄が合う (スキーマ全体と同じく再実行できる)。
 _ADDED_COLUMNS = (
     ("reviews", "head_commit", "TEXT"),
+    ("reviews", "include_quality", "INTEGER NOT NULL DEFAULT 0"),
+    ("jobs", "include_quality", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

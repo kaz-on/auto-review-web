@@ -20,19 +20,25 @@ def worker():
     return ReviewWorker()
 
 
-def _job(auto_post: bool = False) -> store.Job:
+def _job(auto_post: bool = False, include_quality: bool = True) -> store.Job:
     return store.create(
         url="https://github.com/example-org/my-repo/pull/1",
         owner="example-org", repo="my-repo", number=1, auto_post=auto_post,
+        include_quality=include_quality,
     )
 
 
-def _stub_run_review(monkeypatch, body: str = "## 指摘"):
+def _stub_run_review(monkeypatch, body: str = "## 指摘", seen: dict | None = None):
     """run_review を差し替え、渡された進捗関数を通して 1 件保存する。"""
-    def fake(pr, progress=None):
+    def fake(pr, progress=None, include_quality=False):
+        if seen is not None:
+            seen["include_quality"] = include_quality
         if progress:
             progress("レビュー中...")
-        return reviews.create(repo=pr.repo, pr_number=pr.number, body=body)
+        return reviews.create(
+            repo=pr.repo, pr_number=pr.number, body=body,
+            include_quality=include_quality,
+        )
 
     monkeypatch.setattr(review_module, "run_review", fake)
 
@@ -52,8 +58,22 @@ def test_成功したジョブはレビューを参照する(worker, monkeypatch
     assert "レビュー中..." in done.progress
 
 
+@pytest.mark.parametrize("include_quality", [True, False])
+def test_品質改善を含めるかはジョブの設定どおりに渡す(
+    worker, monkeypatch, include_quality
+):
+    seen: dict = {}
+    _stub_run_review(monkeypatch, seen=seen)
+    job = _job(include_quality=include_quality)
+
+    worker._process(job.id)
+
+    assert seen["include_quality"] is include_quality
+    assert reviews.get(store.get(job.id).review_id).include_quality is include_quality
+
+
 def test_想定内のエラーは画面に出す文言で失敗させる(worker, monkeypatch):
-    def fail(pr, progress=None):
+    def fail(pr, progress=None, include_quality=False):
         raise ReviewError("codex がインストールされていません。")
 
     monkeypatch.setattr(review_module, "run_review", fail)
@@ -68,7 +88,7 @@ def test_想定内のエラーは画面に出す文言で失敗させる(worker,
 
 
 def test_想定外の例外でもワーカーは止まらない(worker, monkeypatch):
-    def boom(pr, progress=None):
+    def boom(pr, progress=None, include_quality=False):
         raise RuntimeError("bug")
 
     monkeypatch.setattr(review_module, "run_review", boom)

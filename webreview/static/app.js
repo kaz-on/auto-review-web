@@ -119,6 +119,7 @@ fetchJSON("/api/config").then((cfg) => {
 const form = document.getElementById("review-form");
 const urlInput = document.getElementById("pr-url");
 const autoPostInput = document.getElementById("auto-post");
+const includeQualityInput = document.getElementById("include-quality");
 const submitBtn = document.getElementById("submit-btn");
 const formMessage = document.getElementById("form-message");
 
@@ -131,7 +132,11 @@ form.addEventListener("submit", async (e) => {
     const data = await fetchJSON("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: urlInput.value, auto_post: autoPostInput.checked }),
+      body: JSON.stringify({
+        url: urlInput.value,
+        include_quality: includeQualityInput.checked,
+        auto_post: autoPostInput.checked,
+      }),
     });
     formMessage.classList.add("ok");
     formMessage.textContent = data.was_busy
@@ -156,6 +161,7 @@ const cards = new Map(); // jobId -> { root, refs, loadedResult }
 function buildCard(job) {
   const badge = el("span", { class: "badge" });
   const title = el("span", { class: "job-title" });
+  const quality = el("span", { class: "chip hidden", text: "品質改善" });
   const autopost = el("span", { class: "chip hidden", text: "自動投稿" });
   const delBtn = el("button", {
     class: "del-btn secondary hidden", text: "×",
@@ -163,7 +169,7 @@ function buildCard(job) {
   });
   delBtn.addEventListener("click", () => doDelete(job.id));
   const head = el("div", { class: "job-head" },
-    [badge, title, autopost, el("span", { class: "spacer" }), delBtn]);
+    [badge, title, quality, autopost, el("span", { class: "spacer" }), delBtn]);
   const sub = el("div", { class: "job-sub" });
   const current = el("div", { class: "job-sub" });
   const errorBox = el("div", { class: "error-box hidden" });
@@ -179,7 +185,7 @@ function buildCard(job) {
     [head, sub, current, errorBox, actions, progressDetails]);
 
   const refs = {
-    badge, title, autopost, delBtn, sub, current, errorBox,
+    badge, title, quality, autopost, delBtn, sub, current, errorBox,
     actions, progressPre, progressDetails,
   };
   const card = {
@@ -215,7 +221,8 @@ function updateCard(card, job) {
   if (spinning) r.badge.appendChild(el("span", { class: "spinner" }));
   r.badge.appendChild(document.createTextNode(STATUS_LABEL[job.status] || job.status));
 
-  // 自動投稿チップ / 削除ボタン
+  // 品質改善・自動投稿チップ / 削除ボタン
+  r.quality.classList.toggle("hidden", !job.include_quality);
   r.autopost.classList.toggle("hidden", !job.auto_post);
   const terminal = job.status === "succeeded" || job.status === "failed";
   r.delBtn.classList.toggle("hidden", !terminal);
@@ -508,6 +515,7 @@ function renderSummary(entries) {
     if (e.model) {
       bits.push(e.reasoning_effort ? `${e.model} (${e.reasoning_effort})` : e.model);
     }
+    if (e.include_quality) bits.push("品質改善");
     bits.push(fmtBytes(e.body_bytes));
     const meta = el("div", { class: "meta", text: bits.join(" / ") });
 

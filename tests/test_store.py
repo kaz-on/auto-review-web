@@ -30,6 +30,7 @@ def test_作ったジョブは待機中で返る():
 
     assert job.status == store.QUEUED
     assert job.auto_post is True
+    assert job.include_quality is True
     assert job.posted is False and job.posting is False
     assert job.review_id is None
     assert job.progress == []
@@ -38,6 +39,15 @@ def test_作ったジョブは待機中で返る():
 
 def test_自動投稿を切って作れる():
     assert _create(auto_post=False).auto_post is False
+
+
+def test_品質改善を含めずに作れる():
+    job = _create(include_quality=False)
+
+    assert job.include_quality is False
+    # 投入時に決まる設定なので、あとから書き換えさせない。
+    with pytest.raises(ValueError):
+        store.update(job.id, include_quality=True)
 
 
 def test_存在しないジョブは_none():

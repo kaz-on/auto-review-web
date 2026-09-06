@@ -293,6 +293,21 @@ def test_プロンプトに比較対象のコミットと_pr_本文を埋める(
     assert "'main'" in prompt
     assert "<PR_BODY>\n本文\n</PR_BODY>" in prompt
     assert "タイトル" in prompt
+    # 既定はバグ限定 (codex の既定のレビュー指針のまま)。
+    assert "code quality" not in prompt
+
+
+def test_品質改善を含めるときだけ指示を足す():
+    from webreview.github_api import PullRequest
+
+    pull = PullRequest(base_ref="main", title="タイトル", body="本文")
+
+    prompt = review._build_prompt(pull, "deadbeef", include_quality=True)
+
+    assert review._QUALITY_PROMPT in prompt
+    # 元の指示は残したまま、指示同士をまとめる (PR の情報は末尾のまま)。
+    assert "git diff deadbeef...HEAD" in prompt
+    assert prompt.index(review._QUALITY_PROMPT) < prompt.index("Pull Request Title:")
 
 
 # --- リポジトリの準備 --------------------------------------------------------

@@ -110,10 +110,11 @@ def create_app() -> Flask:
             return jsonify({"error": str(e)}), 400
 
         auto_post = bool(body.get("auto_post", True))
+        include_quality = bool(body.get("include_quality", True))
         was_busy = store.has_active()
         job = store.create(
             url=pr.url, owner=pr.owner, repo=pr.repo, number=pr.number,
-            auto_post=auto_post,
+            auto_post=auto_post, include_quality=include_quality,
         )
         worker.enqueue(job.id)
         return jsonify({"job": _job_public(job), "was_busy": was_busy}), 201

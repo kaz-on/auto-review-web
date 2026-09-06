@@ -110,6 +110,8 @@ def test_レビューを投入するとキューに積まれる(client, worker):
     assert job["status"] == store.QUEUED
     assert job["number"] == 42
     assert job["auto_post"] is True
+    # 品質改善は既定で含める (積極的に使ってもらうため)。
+    assert job["include_quality"] is True
     assert job["has_result"] is False
     assert worker.enqueued == [job["id"]]
 
@@ -118,6 +120,12 @@ def test_自動投稿を切って投入できる(client):
     job = _post_review(client, auto_post=False).get_json()["job"]
 
     assert job["auto_post"] is False
+
+
+def test_品質改善を含めずに投入できる(client):
+    job = _post_review(client, include_quality=False).get_json()["job"]
+
+    assert job["include_quality"] is False
 
 
 def test_先行するジョブがあることを知らせる(client):

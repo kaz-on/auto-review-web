@@ -60,7 +60,9 @@ class ReviewWorker:
 
         pr = ParsedPR(owner=job.owner, repo=job.repo, number=job.number)
         try:
-            result = review.run_review(pr, progress=progress)
+            result = review.run_review(
+                pr, progress=progress, include_quality=job.include_quality
+            )
         except ReviewError as e:
             self._store.update(
                 job_id, status=FAILED, error=str(e), finished_at=time.time()

@@ -98,6 +98,24 @@ def test_レビューを最後まで実行して保存する(
     assert any("rev-0" in line for line in lines)
 
 
+def test_品質改善を含める指定はプロンプトとレビューに残る(
+    fake_codex, stub_git, stub_github, monkeypatch
+):
+    seen: dict = {}
+    original = review._build_prompt
+
+    def spy(pull, base_commit, include_quality=False):
+        seen["include_quality"] = include_quality
+        return original(pull, base_commit, include_quality)
+
+    monkeypatch.setattr(review, "_build_prompt", spy)
+
+    result = review.run_review(PR, include_quality=True)
+
+    assert seen["include_quality"] is True
+    assert reviews.get(result.id).include_quality is True
+
+
 def test_pr_のタイトルをキャッシュする(fake_codex, stub_git, stub_github):
     review.run_review(PR)
 
