@@ -1,10 +1,9 @@
 FROM python:3.12-slim
 
-# --- OS パッケージ + Codex CLI ----------------------------------------------
-# GitHub へのアクセスは REST API (標準ライブラリ) と git で行うため gh は入れない。
+# --- curl & git ----------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl wget gnupg git \
+        curl git \
     && rm -rf /var/lib/apt/lists/*
 
 # Codex CLI を公式インストールスクリプトで導入し、PATH 上に配置する。
