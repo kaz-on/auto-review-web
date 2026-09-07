@@ -142,7 +142,7 @@ python3 -m venv .venv
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |
 | `REVIEW_STDERR_RETENTION_DAYS` | `30` | codex 生ログの保持日数。`0` で削除しない |
-| `REVIEW_WORK_PATH` | `data/work` | リポジトリのクローン先 |
+| `REVIEW_WORK_PATH` | `data/work` | リポジトリの作業ディレクトリ |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | codex の生ログのルート |
 | `REVIEW_DB_PATH` | `data/review.db` | SQLite データベースの位置 |
 | `REVIEW_HOST` | `0.0.0.0` | 待ち受けアドレス |
@@ -236,7 +236,7 @@ remote の検証も実行され、無ければその 2 件だけ skip する。
 ## データの持ち方
 
 状態はすべて SQLite（`REVIEW_DB_PATH`）に入る。ディスク上に残るファイルは
-git のクローンと codex の生ログ（err）だけ。
+git の作業ディレクトリと codex の生ログ（err）だけ。
 
 codex の 2 つの出力は性質が違うため扱いを分けている。
 
@@ -281,8 +281,15 @@ API の SHA に固定することで、PR の情報を取ってから fetch す�
 レビューするより止める方を選んでエラーにする。
 
 GitHub は SHA 指定の fetch に対応しているので、fork からの PR でも、head のブランチ
-が消えたあとでも同じ手順で取得できる。SHA 指定の fetch は ref を作らず GC の対象に
-なりうるため、`refs/review/<PR 番号>/{base,head}` に ref を打ってから使う。
+が消えたあとでも同じ手順で取得できる。SHA 指定の fetch は既定では ref を作らず、
+オブジェクトが GC の対象になりうるので、refspec で
+`refs/review/<PR 番号>/{base,head}` に直接受ける。
+
+必要なコミットは実行時に fetch するため、作業ディレクトリは clone せず
+`git init` + `git remote add` で空から作る。初回に全ブランチ・全履歴を落とさずに
+済み、この段階では GitHub のトークンも要らない。途中で失敗したディレクトリは
+消す（残すと次回は「既にある」と見なされ、origin の無いまま使い続けてしまう）。
+submodule は checkout のあとの `submodule update --init --recursive` で揃える。
 
 ## PR への投稿の形
 

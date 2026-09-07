@@ -31,6 +31,20 @@ def _write_script(path, body: str) -> str:
     return str(path)
 
 
+def _git(cwd, *args) -> str:
+    """本物の git を叩く (作者情報を固定して再現可能にする)。"""
+    env = dict(
+        os.environ,
+        GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
+    )
+    proc = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True, text=True, capture_output=True, env=env,
+    )
+    return proc.stdout.strip()
+
+
 # --- err ログの読み取り ------------------------------------------------------
 BANNER = """\
 OpenAI Codex v1.2.3 (research preview)
@@ -316,6 +330,40 @@ def test_品質改善を含めるときだけ指示を足す():
 
 # --- リポジトリの準備 --------------------------------------------------------
 @需要git
+def test_作業ディレクトリが無ければ_init_して_origin_を付ける(temp_paths):
+    """必要なコミットは実行時に fetch するので、clone せず空から作る。"""
+    work, _ = temp_paths
+    pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
+
+    repo_path = review._prepare_repo(pr, lambda _msg: None)
+
+    assert repo_path == work / "my-repo"
+    assert (repo_path / ".git").is_dir()
+    assert _git(repo_path, "remote", "get-url", "origin") == (
+        "https://github.com/example-org/my-repo.git"
+    )
+
+
+@需要git
+def test_初期化に失敗したら中途半端なディレクトリを残さない(temp_paths, monkeypatch):
+    """残すと次回は「既にある」と見なされ、origin の無いまま使い続けてしまう。"""
+    work, _ = temp_paths
+    original = review._run
+
+    def fail_on_remote(args, *a, **kw):
+        if "remote" in args:
+            raise ReviewError("remote add に失敗しました")
+        return original(args, *a, **kw)
+
+    monkeypatch.setattr(review, "_run", fail_on_remote)
+    pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
+
+    with pytest.raises(ReviewError, match="remote add"):
+        review._prepare_repo(pr, lambda _msg: None)
+    assert not (work / "my-repo").exists()
+
+
+@需要git
 def test_作業ディレクトリの_remote_が_pr_と違えば実行しない(temp_paths, monkeypatch):
     work, _ = temp_paths
     repo_path = work / "my-repo"
@@ -358,19 +406,6 @@ def test_git_リポジトリでないディレクトリは弾く(temp_paths):
 
 
 # --- PR のコミットの取得 -----------------------------------------------------
-def _git(cwd, *args) -> str:
-    env = dict(
-        os.environ,
-        GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
-        GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
-    )
-    proc = subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        check=True, text=True, capture_output=True, env=env,
-    )
-    return proc.stdout.strip()
-
-
 @需要git
 def test_マージ済みの_pr_でも_api_の_sha_で差分が取れる(tmp_path, monkeypatch):
     """base はブランチの先端ではなく PR の base コミットで取る。

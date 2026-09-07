@@ -270,12 +270,17 @@ def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
     repo_url = f"https://github.com/{pr.owner}/{pr.repo}.git"
 
     if not repo_path.exists():
-        progress(f"リポジトリをクローンします: {repo_url}")
-        _run(
-            [config.GIT_BIN, "clone", "--recurse-submodules", repo_url, str(repo_path)],
-            progress=progress,
-            env=_git_env(),
-        )
+        progress(f"リポジトリを初期化します: {repo_url}")
+        # レビュー実行時に必要なコミットだけ fetch するので、clone ではなく
+        # init + remote add で足りる。途中で失敗したら消しておく — 中途半端に
+        # 残すと、次回以降は「既にある」と見なされて origin の無いディレクトリを
+        # 使い続けてしまい、手で消すまで復帰できない。
+        try:
+            _run([config.GIT_BIN, "init", str(repo_path)], progress=progress)
+            _run([config.GIT_BIN, "remote", "add", "origin", repo_url], cwd=repo_path)
+        except BaseException:
+            shutil.rmtree(repo_path, ignore_errors=True)
+            raise
     else:
         progress(f"リポジトリは既に存在します: {repo_path}")
 
@@ -308,22 +313,20 @@ def _checkout_pr(
     fetch するまでの間に push があっても、レビュー対象が一意に決まる。
 
     GitHub は SHA 指定の fetch に対応しているので、fork からの PR でも、head の
-    ブランチが消えたあとでも同じ手順で取得できる。SHA 指定の fetch は ref を作らず
-    GC の対象になりうるため、checkout や codex の `git diff` より前に ref を打つ。
+    ブランチが消えたあとでも同じ手順で取得できる。SHA 指定の fetch は既定では ref を
+    作らず、オブジェクトが GC の対象になりうる。refspec で直接 ref に受けることで、
+    取得した時点から codex が `git diff` を終えるまで確実に残す。
     detached HEAD になるが `git diff <base>...HEAD` には支障ない。
     """
     git_env = _git_env()
 
     progress(f"PR #{pr.number} の base と head のコミットを取得します...")
     _run(
-        [config.GIT_BIN, "fetch", "origin", pull.base_sha, pull.head_sha],
+        [config.GIT_BIN, "fetch", "origin",
+         f"+{pull.base_sha}:refs/review/{pr.number}/base",
+         f"+{pull.head_sha}:refs/review/{pr.number}/head"],
         cwd=repo_path, progress=progress, env=git_env,
     )
-    for name, commit in (("base", pull.base_sha), ("head", pull.head_sha)):
-        _run(
-            [config.GIT_BIN, "update-ref", f"refs/review/{pr.number}/{name}", commit],
-            cwd=repo_path, progress=progress,
-        )
 
     # 前回実行の残骸があっても復帰できるよう、作業ツリーを強制的に合わせる。
     _run([config.GIT_BIN, "checkout", "--force", "--detach", pull.head_sha],
