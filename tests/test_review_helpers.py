@@ -12,11 +12,13 @@ import shutil
 import stat
 import subprocess
 import textwrap
+from types import SimpleNamespace
 
 import pytest
 
 from webreview import config, github_auth, review
 from webreview.errors import ReviewError
+from webreview.github_api import PullRequest
 from webreview.review import ParsedPR
 
 需要git = pytest.mark.skipif(shutil.which("git") is None, reason="git が無い")
@@ -283,11 +285,12 @@ def test_err_ログの保存に失敗してもレビューは成立させる(tmp
 
 # --- プロンプト --------------------------------------------------------------
 def test_プロンプトに比較対象のコミットと_pr_本文を埋める():
-    from webreview.github_api import PullRequest
+    pull = PullRequest(
+        base_ref="main", base_sha="deadbeef", head_sha="cafebabe",
+        title="タイトル", body="本文",
+    )
 
-    pull = PullRequest(base_ref="main", title="タイトル", body="本文")
-
-    prompt = review._build_prompt(pull, "deadbeef")
+    prompt = review._build_prompt(pull)
 
     assert "git diff deadbeef...HEAD" in prompt
     assert "'main'" in prompt
@@ -298,11 +301,12 @@ def test_プロンプトに比較対象のコミットと_pr_本文を埋める(
 
 
 def test_品質改善を含めるときだけ指示を足す():
-    from webreview.github_api import PullRequest
+    pull = PullRequest(
+        base_ref="main", base_sha="deadbeef", head_sha="cafebabe",
+        title="タイトル", body="本文",
+    )
 
-    pull = PullRequest(base_ref="main", title="タイトル", body="本文")
-
-    prompt = review._build_prompt(pull, "deadbeef", include_quality=True)
+    prompt = review._build_prompt(pull, include_quality=True)
 
     assert review._QUALITY_PROMPT in prompt
     # 元の指示は残したまま、指示同士をまとめる (PR の情報は末尾のまま)。
@@ -351,3 +355,70 @@ def test_git_リポジトリでないディレクトリは弾く(temp_paths):
 
     with pytest.raises(ReviewError, match="git リポジトリではありません"):
         review._prepare_repo(pr, lambda _msg: None)
+
+
+# --- PR のコミットの取得 -----------------------------------------------------
+def _git(cwd, *args) -> str:
+    env = dict(
+        os.environ,
+        GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
+    )
+    proc = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True, text=True, capture_output=True, env=env,
+    )
+    return proc.stdout.strip()
+
+
+@需要git
+def test_マージ済みの_pr_でも_api_の_sha_で差分が取れる(tmp_path, monkeypatch):
+    """base はブランチの先端ではなく PR の base コミットで取る。
+
+    先端から取ると、マージ済みの PR では先端が PR 自身を含んでしまい、
+    `git diff <base>...HEAD` の merge-base が head 側に一致して差分が空になる。
+    """
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git(upstream, "init", "-q")
+    _git(upstream, "symbolic-ref", "HEAD", "refs/heads/main")
+    # GitHub と同じく、ref を経由しない SHA 指定の fetch を許す。
+    _git(upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
+    (upstream / "a.txt").write_text("a\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-qm", "A")
+    base_sha = _git(upstream, "rev-parse", "HEAD")
+
+    _git(upstream, "checkout", "-qb", "feature")
+    (upstream / "b.txt").write_text("b\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-qm", "B")
+    head_sha = _git(upstream, "rev-parse", "HEAD")
+
+    _git(upstream, "checkout", "-q", "main")
+    _git(upstream, "merge", "-q", "--no-ff", "-m", "merge", "feature")
+
+    repo_path = tmp_path / "my-repo"
+    subprocess.run(
+        ["git", "clone", "-q", str(upstream), str(repo_path)], check=True
+    )
+    monkeypatch.setattr(
+        github_auth, "get_provider", lambda: SimpleNamespace(token=lambda: "t")
+    )
+    pull = PullRequest(
+        base_ref="main", base_sha=base_sha, head_sha=head_sha,
+        title="タイトル", body="本文",
+    )
+
+    review._checkout_pr(
+        ParsedPR(owner="example-org", repo="my-repo", number=7),
+        repo_path, pull, lambda _msg: None,
+    )
+
+    assert _git(repo_path, "rev-parse", "HEAD") == head_sha
+    # SHA 指定の fetch は ref を作らないので、GC 除けに自分で打つ。
+    assert _git(repo_path, "rev-parse", "refs/review/7/base") == base_sha
+    assert _git(repo_path, "rev-parse", "refs/review/7/head") == head_sha
+    assert _git(repo_path, "diff", "--name-only", f"{base_sha}...HEAD") == "b.txt"
+    # 先端 (マージ後) と比べていたら差分が消えていた。
+    assert _git(repo_path, "diff", "--name-only", "origin/main...HEAD") == ""

@@ -192,22 +192,27 @@ def test_401_以外は再試行しない(capture_requests, status):
 
 
 # --- 高レベル ---------------------------------------------------------------
-def test_pr_の_base_タイトル_本文を取得する(capture_requests):
+def test_pr_の_base_head_タイトル_本文を取得する(capture_requests):
     sent, responses = capture_requests
     responses[:] = [FakeResponse(json.dumps({
-        "base": {"ref": "main"}, "title": "タイトル", "body": "本文",
+        "base": {"ref": "main", "sha": "b" * 40},
+        "head": {"sha": "h" * 40},
+        "title": "タイトル", "body": "本文",
     }).encode())]
 
     pull = github_api.get_pull(FakeProvider("t"), "example-org", "my-repo", 42)
 
     assert (pull.base_ref, pull.title, pull.body) == ("main", "タイトル", "本文")
+    # レビュー対象のコミットはブランチ名から引き直さず、この SHA で確定させる。
+    assert (pull.base_sha, pull.head_sha) == ("b" * 40, "h" * 40)
     assert sent[0].full_url.endswith("/repos/example-org/my-repo/pulls/42")
 
 
 def test_pr_本文が_null_でも空文字にする(capture_requests):
     _, responses = capture_requests
     responses[:] = [FakeResponse(json.dumps({
-        "base": {"ref": "main"}, "title": None, "body": None,
+        "base": {"ref": "main", "sha": "b" * 40}, "head": {"sha": "h" * 40},
+        "title": None, "body": None,
     }).encode())]
 
     pull = github_api.get_pull(FakeProvider("t"), "o", "r", 1)
@@ -220,6 +225,19 @@ def test_base_ブランチが取れなければ実行しない(capture_requests)
     responses[:] = [FakeResponse(b'{"base": {}}')]
 
     with pytest.raises(ApiError, match="base ブランチ"):
+        github_api.get_pull(FakeProvider("t"), "o", "r", 1)
+
+
+@pytest.mark.parametrize("payload, missing", [
+    ('{"base": {"ref": "main"}, "head": {"sha": "hhh"}}', "base"),
+    ('{"base": {"ref": "main", "sha": "bbb"}, "head": {}}', "head"),
+])
+def test_コミットの_sha_が取れなければ実行しない(capture_requests, payload, missing):
+    # 取り違えたコミットをレビューするより、止めて知らせる方を選ぶ。
+    _, responses = capture_requests
+    responses[:] = [FakeResponse(payload.encode())]
+
+    with pytest.raises(ApiError, match=f"{missing} コミット"):
         github_api.get_pull(FakeProvider("t"), "o", "r", 1)
 
 

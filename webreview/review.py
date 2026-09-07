@@ -297,47 +297,42 @@ def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
 
 
 def _checkout_pr(
-    pr: ParsedPR, repo_path: Path, base_ref: str, progress: ProgressFn
-) -> tuple[str, str]:
-    """base と PR の head を取得し、PR のコミットを checkout する。
+    pr: ParsedPR, repo_path: Path, pull: github_api.PullRequest, progress: ProgressFn
+) -> None:
+    """PR の base と head のコミットを取得し、head を checkout する。
 
-    (base_commit, head_commit) を返す。head_commit はレビューしたコミットそのもので、
-    投稿時に行コメントの commit_id として使う (その後 PR が更新されても、レビューが
-    どの版に対するものかがコメントに残る)。
+    どちらのコミットも API が返した SHA をそのまま使い、ブランチ名から引き直さない。
+    base をブランチの先端から取ると、PR がマージされたあとは先端が PR 自身を含んで
+    しまい、`git diff <base>...HEAD` の merge-base が head 側に一致して差分が空になる。
+    head も API の SHA に固定することで、PR の情報 (タイトル・本文・base) を取ってから
+    fetch するまでの間に push があっても、レビュー対象が一意に決まる。
 
-    `gh pr checkout` の代わりに refs/pull/<n>/head を直接 fetch する。fork からの PR
-    でも同じ手順で扱え、detached HEAD になるが `git diff <base>...HEAD` には支障ない。
-    fetch した先は remote-tracking ref に書き込み、以降の GC で失われないようにする。
+    GitHub は SHA 指定の fetch に対応しているので、fork からの PR でも、head の
+    ブランチが消えたあとでも同じ手順で取得できる。SHA 指定の fetch は ref を作らず
+    GC の対象になりうるため、checkout や codex の `git diff` より前に ref を打つ。
+    detached HEAD になるが `git diff <base>...HEAD` には支障ない。
     """
     git_env = _git_env()
-    base_remote_ref = f"refs/remotes/origin/{base_ref}"
-    pr_remote_ref = f"refs/remotes/origin/pr/{pr.number}"
 
-    progress(f"base ブランチ {base_ref} を取得します...")
+    progress(f"PR #{pr.number} の base と head のコミットを取得します...")
     _run(
-        [config.GIT_BIN, "fetch", "--force", "origin",
-         f"refs/heads/{base_ref}:{base_remote_ref}"],
+        [config.GIT_BIN, "fetch", "origin", pull.base_sha, pull.head_sha],
         cwd=repo_path, progress=progress, env=git_env,
     )
-    base_commit = _run([config.GIT_BIN, "rev-parse", base_remote_ref], cwd=repo_path)
-
-    progress(f"PR #{pr.number} の head を取得します...")
-    _run(
-        [config.GIT_BIN, "fetch", "--force", "origin",
-         f"refs/pull/{pr.number}/head:{pr_remote_ref}"],
-        cwd=repo_path, progress=progress, env=git_env,
-    )
-    pr_commit = _run([config.GIT_BIN, "rev-parse", pr_remote_ref], cwd=repo_path)
+    for name, commit in (("base", pull.base_sha), ("head", pull.head_sha)):
+        _run(
+            [config.GIT_BIN, "update-ref", f"refs/review/{pr.number}/{name}", commit],
+            cwd=repo_path, progress=progress,
+        )
 
     # 前回実行の残骸があっても復帰できるよう、作業ツリーを強制的に合わせる。
-    _run([config.GIT_BIN, "checkout", "--force", "--detach", pr_commit],
+    _run([config.GIT_BIN, "checkout", "--force", "--detach", pull.head_sha],
          cwd=repo_path, progress=progress)
     _run([config.GIT_BIN, "clean", "-ffd"], cwd=repo_path, progress=progress)
     _run(
         [config.GIT_BIN, "submodule", "update", "--init", "--recursive", "--force"],
         cwd=repo_path, progress=progress, env=git_env,
     )
-    return base_commit, pr_commit
 
 
 # codex の既定のレビュー指針は「一般的なコード品質の指摘」を明示的に除外している。
@@ -378,10 +373,11 @@ correctness verdict negative.
 """
 
 
-def _build_prompt(
-    pull: github_api.PullRequest, base_commit: str, include_quality: bool = False
-) -> str:
+def _build_prompt(pull: github_api.PullRequest, include_quality: bool = False) -> str:
     base_ref = pull.base_ref
+    # base ブランチの先端ではなく PR の base コミットと比べる。三点ドットなので、
+    # そこから枝分かれした地点 (merge-base) からの差分になる。
+    base_commit = pull.base_sha
     # 指示はすべて先に置き、PR のタイトル・本文 (作者が書いた文章) は末尾に回す。
     instructions = (
         f"Review the code changes against the target branch '{base_ref}'. "
@@ -491,12 +487,12 @@ def run_review(
     reviews.put_title(pr.repo, pr.number, pull.title)
 
     repo_path = _prepare_repo(pr, progress)
-    base_commit, head_commit = _checkout_pr(pr, repo_path, pull.base_ref, progress)
+    _checkout_pr(pr, repo_path, pull, progress)
 
     progress("PR のタイトル・本文からプロンプトを組み立てます...")
     if include_quality:
         progress("バグに加えて、書き方・品質の改善も指摘対象に含めます。")
-    prompt = _build_prompt(pull, base_commit, include_quality)
+    prompt = _build_prompt(pull, include_quality)
 
     output_dir = config.LOGS_PATH / pr.repo
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -518,8 +514,8 @@ def run_review(
         pr_number=pr.number,
         body=run.body,
         base_ref=pull.base_ref,
-        base_commit=base_commit,
-        head_commit=head_commit,
+        base_commit=pull.base_sha,
+        head_commit=pull.head_sha,
         model=run.model,
         reasoning_effort=run.reasoning_effort,
         codex_version=run.codex_version,

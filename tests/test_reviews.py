@@ -264,6 +264,13 @@ def test_タイトル未取得のレビューも一覧に出す():
 
 
 # --- タイトルの取り直し -----------------------------------------------------
+def _pull(title: str) -> github_api.PullRequest:
+    """取り直しで使うのは title だけなので、残りは埋めておく。"""
+    return github_api.PullRequest(
+        base_ref="main", base_sha="b" * 40, head_sha="h" * 40, title=title, body="",
+    )
+
+
 def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_org):
     _create(repo="my-repo", pr_number=1)
     _create(repo="my-repo", pr_number=2)
@@ -272,7 +279,7 @@ def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_org):
 
     def fake_get_pull(provider, owner, repo, number):
         asked.append(number)
-        return github_api.PullRequest(base_ref="main", title=f"PR {number}", body="")
+        return _pull(f"PR {number}")
 
     monkeypatch.setattr(github_api, "get_pull", fake_get_pull)
     monkeypatch.setattr(github_auth, "get_provider", lambda: object())
@@ -288,7 +295,7 @@ def test_取得件数に上限を設ける(monkeypatch, review_org):
 
     monkeypatch.setattr(
         github_api, "get_pull",
-        lambda *a, **k: github_api.PullRequest(base_ref="main", title="t", body=""),
+        lambda *a, **k: _pull("t"),
     )
     monkeypatch.setattr(github_auth, "get_provider", lambda: object())
 
@@ -302,7 +309,7 @@ def test_一部の取得に失敗しても集計は成立させる(monkeypatch, 
     def fake_get_pull(provider, owner, repo, number):
         if number == 1:
             raise ReviewError("削除された PR です")
-        return github_api.PullRequest(base_ref="main", title="PR 2", body="")
+        return _pull("PR 2")
 
     monkeypatch.setattr(github_api, "get_pull", fake_get_pull)
     monkeypatch.setattr(github_auth, "get_provider", lambda: object())

@@ -54,9 +54,8 @@ def stub_git(monkeypatch, temp_paths):
         seen["prepare"] = pr
         return repo_path
 
-    def fake_checkout(pr, path, base_ref, progress):
-        seen["base_ref"] = base_ref
-        return "basecommit1234", "headcommit5678"
+    def fake_checkout(pr, path, pull, progress):
+        seen["pull"] = pull
 
     monkeypatch.setattr(review, "_prepare_repo", fake_prepare)
     monkeypatch.setattr(review, "_checkout_pr", fake_checkout)
@@ -70,7 +69,11 @@ def stub_github(monkeypatch):
     monkeypatch.setattr(
         github_api, "get_pull",
         lambda *a, **k: github_api.PullRequest(
-            base_ref="main", title="PR のタイトル", body="PR の本文"
+            base_ref="main",
+            base_sha="basecommit1234",
+            head_sha="headcommit5678",
+            title="PR のタイトル",
+            body="PR の本文",
         ),
     )
 
@@ -85,6 +88,7 @@ def test_レビューを最後まで実行して保存する(
     assert result.rev == 0
     assert result.body == "## 指摘事項\n- 何か"
     assert result.base_ref == "main"
+    # base / head はどちらも API が返した SHA をそのまま残す。
     assert result.base_commit == "basecommit1234"
     # レビューした版を残しておき、投稿時に行コメントの commit_id として使う。
     assert result.head_commit == "headcommit5678"
@@ -94,7 +98,7 @@ def test_レビューを最後まで実行して保存する(
     assert result.session_id == "0199-abcd"
     # err ログの先頭だけを残し、トランスクリプトは持ち込まない。
     assert "git diff" not in result.details
-    assert stub_git["base_ref"] == "main"
+    assert stub_git["pull"].base_ref == "main"
     assert any("rev-0" in line for line in lines)
 
 
@@ -104,9 +108,9 @@ def test_品質改善を含める指定はプロンプトとレビューに残�
     seen: dict = {}
     original = review._build_prompt
 
-    def spy(pull, base_commit, include_quality=False):
+    def spy(pull, include_quality=False):
         seen["include_quality"] = include_quality
-        return original(pull, base_commit, include_quality)
+        return original(pull, include_quality)
 
     monkeypatch.setattr(review, "_build_prompt", spy)
 

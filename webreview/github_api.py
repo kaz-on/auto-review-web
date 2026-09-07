@@ -42,6 +42,8 @@ class ApiError(ReviewError):
 @dataclass
 class PullRequest:
     base_ref: str
+    base_sha: str
+    head_sha: str
     title: str
     body: str
 
@@ -116,15 +118,32 @@ def _request_with_token(
 # --- 高レベル API ------------------------------------------------------------
 
 def get_pull(provider: TokenProvider, owner: str, repo: str, number: int) -> PullRequest:
-    """PR の base ブランチ・タイトル・本文をまとめて取得する。"""
+    """PR の base/head コミット・base ブランチ・タイトル・本文をまとめて取得する。
+
+    レビュー対象のコミットはここで返す SHA で確定させる。ブランチ名から git で
+    引き直すと、PR がマージされたあとに base ブランチの先端が PR 自身を含んでしまう。
+    SHA が欠けた応答は、取り違えたコミットをレビューするより止める方が安全なので
+    エラーにする。
+    """
     data = _request_with_token(provider, "GET", f"/repos/{owner}/{repo}/pulls/{number}")
     if not isinstance(data, dict):
         raise ApiError(f"PR の情報を取得できませんでした: {owner}/{repo}#{number}")
-    base_ref = (data.get("base") or {}).get("ref") or ""
+    base = data.get("base") or {}
+    head = data.get("head") or {}
+    base_ref = base.get("ref") or ""
     if not base_ref:
         raise ApiError(f"PR の base ブランチを取得できませんでした: {owner}/{repo}#{number}")
+    base_sha = base.get("sha") or ""
+    head_sha = head.get("sha") or ""
+    for label, sha in (("base", base_sha), ("head", head_sha)):
+        if not sha:
+            raise ApiError(
+                f"PR の {label} コミットを取得できませんでした: {owner}/{repo}#{number}"
+            )
     return PullRequest(
         base_ref=base_ref,
+        base_sha=base_sha,
+        head_sha=head_sha,
         title=data.get("title") or "",
         # body は null になりうる。
         body=data.get("body") or "",
