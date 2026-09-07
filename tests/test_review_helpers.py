@@ -45,6 +45,47 @@ def _git(cwd, *args) -> str:
     return proc.stdout.strip()
 
 
+def _upstream_repo(path):
+    """GitHub の代わりになる upstream を作る。
+
+    SHA 指定の fetch は、ローカルの upstream なら設定に関わらず通ってしまう
+    (uploadpack.allow*SHA1InWant は効かない)。GitHub が返すかどうかの条件までは
+    再現できないので、ここで確かめるのは git に渡す指定と、その結果の差分。
+    """
+    path.mkdir()
+    _git(path, "init", "-q")
+    _git(path, "symbolic-ref", "HEAD", "refs/heads/main")
+    return path
+
+
+def _commit(repo, name: str) -> str:
+    """ファイルを 1 つ足してコミットし、その SHA を返す。"""
+    (repo / name).write_text(f"{name}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", name)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _work_repo(path, upstream):
+    """_prepare_repo と同じ形 (clone ではなく init + remote add) で作業ツリーを作る。"""
+    path.mkdir()
+    _git(path, "init", "-q")
+    _git(path, "remote", "add", "origin", str(upstream))
+    return path
+
+
+def _checkout(repo_path, base_ref, base_sha, head_sha):
+    """_checkout_pr を PR #7 として呼ぶ。"""
+    pull = PullRequest(
+        base_ref=base_ref, base_sha=base_sha, head_sha=head_sha,
+        title="タイトル", body="本文",
+    )
+    review._checkout_pr(
+        ParsedPR(owner="example-org", repo="my-repo", number=7),
+        repo_path, pull, lambda _msg: None,
+    )
+
+
 # --- err ログの読み取り ------------------------------------------------------
 BANNER = """\
 OpenAI Codex v1.2.3 (research preview)
@@ -406,54 +447,73 @@ def test_git_リポジトリでないディレクトリは弾く(temp_paths):
 
 
 # --- PR のコミットの取得 -----------------------------------------------------
+@pytest.fixture
+def fake_token(monkeypatch):
+    """_git_env が呼ぶトークン取得を差し替える (ローカルの upstream には要らない)。"""
+    monkeypatch.setattr(
+        github_auth, "get_provider", lambda: SimpleNamespace(token=lambda: "t")
+    )
+
+
 @需要git
-def test_マージ済みの_pr_でも_api_の_sha_で差分が取れる(tmp_path, monkeypatch):
+def test_マージ済みの_pr_でも_api_の_sha_で差分が取れる(tmp_path, fake_token):
     """base はブランチの先端ではなく PR の base コミットで取る。
 
     先端から取ると、マージ済みの PR では先端が PR 自身を含んでしまい、
     `git diff <base>...HEAD` の merge-base が head 側に一致して差分が空になる。
     """
-    upstream = tmp_path / "upstream"
-    upstream.mkdir()
-    _git(upstream, "init", "-q")
-    _git(upstream, "symbolic-ref", "HEAD", "refs/heads/main")
-    # GitHub と同じく、ref を経由しない SHA 指定の fetch を許す。
-    _git(upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
-    (upstream / "a.txt").write_text("a\n")
-    _git(upstream, "add", "-A")
-    _git(upstream, "commit", "-qm", "A")
-    base_sha = _git(upstream, "rev-parse", "HEAD")
-
+    upstream = _upstream_repo(tmp_path / "upstream")
+    base_sha = _commit(upstream, "a.txt")
     _git(upstream, "checkout", "-qb", "feature")
-    (upstream / "b.txt").write_text("b\n")
-    _git(upstream, "add", "-A")
-    _git(upstream, "commit", "-qm", "B")
-    head_sha = _git(upstream, "rev-parse", "HEAD")
-
+    head_sha = _commit(upstream, "b.txt")
     _git(upstream, "checkout", "-q", "main")
     _git(upstream, "merge", "-q", "--no-ff", "-m", "merge", "feature")
 
-    repo_path = tmp_path / "my-repo"
-    subprocess.run(
-        ["git", "clone", "-q", str(upstream), str(repo_path)], check=True
-    )
-    monkeypatch.setattr(
-        github_auth, "get_provider", lambda: SimpleNamespace(token=lambda: "t")
-    )
-    pull = PullRequest(
-        base_ref="main", base_sha=base_sha, head_sha=head_sha,
-        title="タイトル", body="本文",
-    )
+    repo_path = _work_repo(tmp_path / "my-repo", upstream)
 
-    review._checkout_pr(
-        ParsedPR(owner="example-org", repo="my-repo", number=7),
-        repo_path, pull, lambda _msg: None,
-    )
+    _checkout(repo_path, "main", base_sha, head_sha)
 
     assert _git(repo_path, "rev-parse", "HEAD") == head_sha
-    # SHA 指定の fetch は ref を作らないので、GC 除けに自分で打つ。
+    # refspec で fetch するので、取得した時点で ref が付いている (GC 除け)。
     assert _git(repo_path, "rev-parse", "refs/review/7/base") == base_sha
     assert _git(repo_path, "rev-parse", "refs/review/7/head") == head_sha
     assert _git(repo_path, "diff", "--name-only", f"{base_sha}...HEAD") == "b.txt"
-    # 先端 (マージ後) と比べていたら差分が消えていた。
+
+    # 先端 (マージ後) と比べていたら差分が消えていた。本番の fetch は先端を
+    # 取らないので、この確認のためだけに取る。
+    _git(repo_path, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
     assert _git(repo_path, "diff", "--name-only", "origin/main...HEAD") == ""
+
+
+@需要git
+def test_base_のブランチが消えていても_sha_なら取れる(tmp_path, fake_token):
+    """feature から feature へ出した PR を、両方マージ・削除されたあとに見る。
+
+    base がブランチとして残っていないので、ブランチ名で fetch していると base が
+    引けずレビューできない。マージされていればコミット自体は base ブランチ
+    (ここでは main) から到達できるので、SHA で要求すれば取れる。
+    """
+    upstream = _upstream_repo(tmp_path / "upstream")
+    _commit(upstream, "a.txt")
+    _git(upstream, "checkout", "-qb", "feature-a")
+    base_sha = _commit(upstream, "b.txt")  # PR の base = feature-a の先端
+    _git(upstream, "checkout", "-qb", "feature-b")
+    head_sha = _commit(upstream, "c.txt")  # PR の head
+    # feature-a → main、feature-b → main の順にマージし、どちらも削除する。
+    _git(upstream, "checkout", "-q", "main")
+    _git(upstream, "merge", "-q", "--no-ff", "-m", "merge feature-a", "feature-a")
+    _git(upstream, "merge", "-q", "--no-ff", "-m", "merge feature-b", "feature-b")
+    _git(upstream, "branch", "-qD", "feature-a")
+    _git(upstream, "branch", "-qD", "feature-b")
+
+    repo_path = _work_repo(tmp_path / "my-repo", upstream)
+    # ブランチ名では引けない。これが SHA で fetch する理由。
+    with pytest.raises(subprocess.CalledProcessError):
+        _git(repo_path, "fetch", "origin", "refs/heads/feature-a:refs/tmp")
+
+    _checkout(repo_path, "feature-a", base_sha, head_sha)
+
+    assert _git(repo_path, "rev-parse", "refs/review/7/base") == base_sha
+    assert _git(repo_path, "rev-parse", "HEAD") == head_sha
+    # 差分は PR 自身の変更だけ。base が feature-a なので b.txt は入らない。
+    assert _git(repo_path, "diff", "--name-only", f"{base_sha}...HEAD") == "c.txt"

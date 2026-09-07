@@ -280,10 +280,12 @@ API の SHA に固定することで、PR の情報を取ってから fetch す�
 あってもレビュー対象が一意に決まる。SHA が取れない応答は、取り違えたコミットを
 レビューするより止める方を選んでエラーにする。
 
-GitHub は SHA 指定の fetch に対応しているので、fork からの PR でも、head のブランチ
-が消えたあとでも同じ手順で取得できる。SHA 指定の fetch は既定では ref を作らず、
-オブジェクトが GC の対象になりうるので、refspec で
-`refs/review/<PR 番号>/{base,head}` に直接受ける。
+GitHub は ref から到達できる SHA なら fetch させるので、fork からの PR でも、
+ブランチが消えたあとでも同じ手順で取得できる。これは head だけの話ではない
+— feature ブランチから feature ブランチへ出した PR は、どちらもマージされて
+削除されると base のブランチも残らないが、コミットはマージ先から到達できるので
+SHA で要求すれば取れる。SHA 指定の fetch は既定では ref を作らず、オブジェクトが
+GC の対象になりうるので、refspec で `refs/review/<PR 番号>/{base,head}` に直接受ける。
 
 必要なコミットは実行時に fetch するため、作業ディレクトリは clone せず
 `git init` + `git remote add` で空から作る。初回に全ブランチ・全履歴を落とさずに
