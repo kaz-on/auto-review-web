@@ -17,9 +17,10 @@ RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
     && ln -sf "$target" /usr/local/bin/codex \
     && codex --version
 
-# Codex CLI は bubblewrap を使ってサンドボックス化するため、bubblewrap をインストールする。
-RUN apt-get update && apt-get install -y bubblewrap && \
-    rm -rf /var/lib/apt/lists/*
+# bubblewrap は明示的にインストールせず、Codex CLI 同梱の bubblewrap を使用する。
+# apt で bubblewrap をインストールすると一部の環境で権限エラーで動作しないため。
+# codex 実行時に以下の警告が表示されるが問題はない。
+# warning: Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.
 
 # --- アプリケーション -------------------------------------------------------
 WORKDIR /app
