@@ -1,6 +1,6 @@
 // フロントエンド (webreview/static) の型検査だけを行う設定。
 // ビルドはせず (noEmit)、配信されるのは app.js そのもの。
-//   npx tsc --noEmit
+//   npx -p typescript@5 tsc --noEmit
 // VS Code はこの設定を自動で読むので、エディタ上では何も入れずに検査が効く。
 {
   "compilerOptions": {

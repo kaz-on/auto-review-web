@@ -1,5 +1,5 @@
 // @ts-check
-// 型検査は `npx tsc --noEmit` (設定は tsconfig.json)。API の型は static/types.d.ts。
+// 型検査は `npx -p typescript@5 tsc --noEmit` (設定は tsconfig.json)。API の型は static/types.d.ts。
 "use strict";
 
 /** @type {Record<JobStatus, string>} */

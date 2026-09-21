@@ -239,8 +239,12 @@ remote の検証も実行され、無ければその 2 件だけ skip する。
 させる。実行に Node は要らず、検査したいときだけ使う。
 
 ```bash
-npx tsc --noEmit
+npx -p typescript@5 tsc --noEmit
 ```
+
+`-p typescript@5` は省略しないこと。npm には TypeScript と無関係の `tsc` という
+パッケージがあり、TypeScript が入っていない環境で `npx tsc` とだけ打つとそちらが
+実行されて失敗する。
 
 VS Code はこの設定を自動で読むので、エディタ上では何も入れなくても検査が効く。
 

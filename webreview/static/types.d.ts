@@ -4,7 +4,7 @@
  * サーバ側 (server.py / store.py / reviews.py) の辞書を手で写したもので、
  * 自動では同期しない。API のフィールドを変えたらここも直すこと。
  *
- * このファイルは型検査 (npx tsc --noEmit) だけに使い、ブラウザへは配信しない
+ * このファイルは型検査 (npx -p typescript@5 tsc --noEmit) だけに使い、ブラウザへは配信しない
  * (index.html が読むのは app.js のみ)。
  */
 
