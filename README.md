@@ -93,13 +93,17 @@ docker compose up -d --build
 - Python 3.10 以上
 - `git` / `codex`
 
-認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。ただし
-`run.sh` は `.env` を読まないため、**必須の環境変数（GitHub 認証・`CODEX_API_KEY`・
-`REVIEW_ORG`）は自分で export しておく**こと。`REVIEW_ORG` が未設定のまま起動すると、
-サーバーは立ち上がるがレビューはすべて拒否される（起動ログに `[warn]` が出る）。
+認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。`run.sh` は
+起動時にリポジトリ直下の `.env` を読んで export するので、設定は docker compose と
+同じ 1 ファイルで済む（`.env.example` をコピーして埋める）。**`.env` が無いと
+`run.sh` はエラーで終了する。** 環境変数を自分で export して使うなら、空の `.env`
+を置けばよい。
+
+`REVIEW_ORG` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
+拒否される（起動ログに `[warn]` が出る）。
 
 ```bash
-export REVIEW_ORG=<your-org>
+cp .env.example .env   # 初回のみ。REVIEW_ORG などを埋める
 ./run.sh
 ```
 
@@ -202,7 +206,7 @@ run.sh                起動スクリプト（ホスト直接起動用）
 Dockerfile            codex / アプリを含むイメージ定義
 docker-compose.yml    起動定義（volume・環境変数）
 secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
-.env.example          docker compose 用の環境変数テンプレート
+.env.example          環境変数のテンプレート（docker compose / run.sh 共通）
 requirements-dev.txt  テスト用の追加依存
 tsconfig.json         フロントエンドの型検査設定（ビルドはしない）
 ```
