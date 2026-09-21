@@ -196,6 +196,7 @@ webreview/
   worker.py      単一ワーカーによる直列実行キュー
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
+    types.d.ts   API レスポンスの型（型検査専用。配信はしない）
 tests/                pytest によるテスト
 run.sh                起動スクリプト（ホスト直接起動用）
 Dockerfile            codex / アプリを含むイメージ定義
@@ -203,6 +204,7 @@ docker-compose.yml    起動定義（volume・環境変数）
 secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 .env.example          docker compose 用の環境変数テンプレート
 requirements-dev.txt  テスト用の追加依存
+tsconfig.json         フロントエンドの型検査設定（ビルドはしない）
 ```
 
 ## テスト
@@ -219,6 +221,22 @@ remote の検証も実行され、無ければその 2 件だけ skip する。
 設定 (`config`) は import 時に環境変数から読む定数なので、テストでは
 `monkeypatch.setattr(config, ...)` で差し替える。`data/` は `tests/conftest.py` の
 `isolate_data_paths` が一時ディレクトリへ逃がすため、テストが実データを触ることはない。
+
+### フロントエンドの型検査
+
+`static/app.js` は素の JavaScript のまま配信する（ビルドは無い）。型は JSDoc の
+コメントで書き、先頭の `// @ts-check` と `tsconfig.json` で TypeScript に検査だけ
+させる。実行に Node は要らず、検査したいときだけ使う。
+
+```bash
+npx tsc --noEmit
+```
+
+VS Code はこの設定を自動で読むので、エディタ上では何も入れなくても検査が効く。
+
+API レスポンスの型は `static/types.d.ts` にまとめてある。これはサーバ側
+（`server.py` / `store.py` / `reviews.py` が返す辞書）を手で写したもので自動では
+同期しない。**API のフィールドを変えたら types.d.ts も直すこと。**
 
 ## API
 

@@ -16,6 +16,9 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# フロントエンドの型検査で tsc をローカルに入れた場合
+node_modules/
+
 # エディタ / OS
 .DS_Store
 *.swp

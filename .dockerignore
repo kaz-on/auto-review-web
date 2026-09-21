@@ -9,5 +9,7 @@ data
 secrets
 README.md
 tests
+# 型検査専用。ブラウザからは読まないのでイメージには入れない。
+webreview/static/types.d.ts
 pytest.ini
 requirements-dev.txt

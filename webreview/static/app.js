@@ -1,5 +1,8 @@
+// @ts-check
+// 型検査は `npx tsc --noEmit` (設定は tsconfig.json)。API の型は static/types.d.ts。
 "use strict";
 
+/** @type {Record<JobStatus, string>} */
 const STATUS_LABEL = {
   queued: "待機中",
   running: "実行中",
@@ -8,16 +11,38 @@ const STATUS_LABEL = {
 };
 
 // ---- ユーティリティ --------------------------------------------------------
+/**
+ * @typedef {object} ElOptions
+ * @property {string} [class]
+ * @property {string} [text]
+ * @property {string} [href]
+ * @property {Record<string, string>} [attrs]
+ */
+
+/**
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} tag
+ * @param {ElOptions} [opts]
+ * @param {(Node | null | undefined)[]} [children]
+ * @returns {HTMLElementTagNameMap[K]}
+ */
 function el(tag, opts = {}, children = []) {
   const node = document.createElement(tag);
   if (opts.class) node.className = opts.class;
   if (opts.text != null) node.textContent = opts.text;
-  if (opts.href) node.href = opts.href;
+  // href を持つのは a などに限られるので、型検査のうえではここだけ絞り込む。
+  if (opts.href) /** @type {HTMLAnchorElement} */ (node).href = opts.href;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
   for (const c of children) if (c) node.appendChild(c);
   return node;
 }
 
+/**
+ * JSON API を叩く。レスポンスの型は呼び出し側で注釈する (types.d.ts を参照)。
+ * @param {string} url
+ * @param {RequestInit} [options]
+ * @returns {Promise<any>}
+ */
 async function fetchJSON(url, options) {
   const res = await fetch(url, options);
   let data = null;
@@ -29,21 +54,30 @@ async function fetchJSON(url, options) {
   return data;
 }
 
+/**
+ * @param {number | null} epoch
+ * @returns {string}
+ */
 function fmtTime(epoch) {
   if (!epoch) return "";
   const d = new Date(epoch * 1000);
+  /** @param {number} n */
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
     `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 // ---- タブ切り替え ----------------------------------------------------------
-document.querySelectorAll(".tab-btn").forEach((btn) => {
+const tabButtons =
+  /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll(".tab-btn"));
+tabButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
-    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    const panel =
+      /** @type {HTMLElement} */ (document.getElementById("tab-" + btn.dataset.tab));
+    panel.classList.add("active");
     if (btn.dataset.tab === "summary") loadSummary();
   });
 });
@@ -57,6 +91,10 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 const LINK_RE =
   /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[\w\-._~:/?#@!$&'*+,;=%[\]]+)/g;
 
+/**
+ * @param {HTMLElement} parent
+ * @param {string} text
+ */
 function appendInline(parent, text) {
   let last = 0;
   for (const m of text.matchAll(LINK_RE)) {
@@ -81,8 +119,9 @@ function appendInline(parent, text) {
   if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
 }
 
+/** @param {string} text */
 function renderDescription(text) {
-  const box = document.getElementById("description");
+  const box = /** @type {HTMLDivElement} */ (document.getElementById("description"));
   if (!text) return; // 未設定なら領域ごと出さない
   for (const block of text.split(/\n\s*\n/)) {
     const lines = block.split("\n").map((l) => l.trim()).filter((l) => l);
@@ -106,22 +145,23 @@ function renderDescription(text) {
 }
 
 // ---- 設定表示 --------------------------------------------------------------
-fetchJSON("/api/config").then((cfg) => {
+fetchJSON("/api/config").then((/** @type {ConfigResponse} */ cfg) => {
   const model = cfg.reasoning_effort
     ? `${cfg.model}（reasoning: ${cfg.reasoning_effort}）`
     : cfg.model;
-  document.getElementById("config-meta").textContent =
-    `対象 Organization: ${cfg.org} / モデル: ${model}`;
+  const meta = /** @type {HTMLElement} */ (document.getElementById("config-meta"));
+  meta.textContent = `対象 Organization: ${cfg.org} / モデル: ${model}`;
   renderDescription(cfg.description);
 }).catch(() => {});
 
 // ---- レビュー投入フォーム --------------------------------------------------
-const form = document.getElementById("review-form");
-const urlInput = document.getElementById("pr-url");
-const autoPostInput = document.getElementById("auto-post");
-const includeQualityInput = document.getElementById("include-quality");
-const submitBtn = document.getElementById("submit-btn");
-const formMessage = document.getElementById("form-message");
+const form = /** @type {HTMLFormElement} */ (document.getElementById("review-form"));
+const urlInput = /** @type {HTMLInputElement} */ (document.getElementById("pr-url"));
+const autoPostInput = /** @type {HTMLInputElement} */ (document.getElementById("auto-post"));
+const includeQualityInput =
+  /** @type {HTMLInputElement} */ (document.getElementById("include-quality"));
+const submitBtn = /** @type {HTMLButtonElement} */ (document.getElementById("submit-btn"));
+const formMessage = /** @type {HTMLParagraphElement} */ (document.getElementById("form-message"));
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -129,6 +169,7 @@ form.addEventListener("submit", async (e) => {
   formMessage.textContent = "";
   submitBtn.disabled = true;
   try {
+    /** @type {CreateReviewResponse} */
     const data = await fetchJSON("/api/reviews", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,11 +194,45 @@ form.addEventListener("submit", async (e) => {
 });
 
 // ---- ジョブ一覧 (差分更新) --------------------------------------------------
-const jobList = document.getElementById("job-list");
-const jobEmpty = document.getElementById("job-empty");
-const busyBanner = document.getElementById("busy-banner");
-const cards = new Map(); // jobId -> { root, refs, loadedResult }
+const jobList = /** @type {HTMLDivElement} */ (document.getElementById("job-list"));
+const jobEmpty = /** @type {HTMLParagraphElement} */ (document.getElementById("job-empty"));
+const busyBanner = /** @type {HTMLDivElement} */ (document.getElementById("busy-banner"));
 
+/**
+ * カード内で更新し続ける要素。postBtn / postStatus はジョブが完了したときに
+ * 初めて作られるので省略可能。
+ * @typedef {object} CardRefs
+ * @property {HTMLSpanElement} badge
+ * @property {HTMLSpanElement} title
+ * @property {HTMLSpanElement} quality
+ * @property {HTMLSpanElement} autopost
+ * @property {HTMLButtonElement} delBtn
+ * @property {HTMLDivElement} sub
+ * @property {HTMLDivElement} current
+ * @property {HTMLDivElement} errorBox
+ * @property {HTMLDivElement} actions
+ * @property {HTMLPreElement} progressPre
+ * @property {HTMLDetailsElement} progressDetails
+ * @property {HTMLButtonElement} [postBtn]
+ * @property {HTMLSpanElement} [postStatus]
+ */
+
+/**
+ * @typedef {object} Card
+ * @property {HTMLDivElement} root
+ * @property {CardRefs} refs
+ * @property {boolean} loadedResult
+ * @property {boolean} loadedProgress
+ * @property {boolean} needsProgressFetch
+ */
+
+/** @type {Map<string, Card>} */
+const cards = new Map(); // jobId -> Card
+
+/**
+ * @param {Job} job
+ * @returns {Card}
+ */
 function buildCard(job) {
   const badge = el("span", { class: "badge" });
   const title = el("span", { class: "job-title" });
@@ -188,6 +263,7 @@ function buildCard(job) {
     badge, title, quality, autopost, delBtn, sub, current, errorBox,
     actions, progressPre, progressDetails,
   };
+  /** @type {Card} */
   const card = {
     root, refs, loadedResult: false, loadedProgress: false,
     needsProgressFetch: false,
@@ -200,6 +276,7 @@ function buildCard(job) {
     }
     card.loadedProgress = true;
     try {
+      /** @type {JobDetail} */
       const d = await fetchJSON(`/api/reviews/${job.id}`);
       progressPre.textContent = (d.progress || []).join("\n");
     } catch (err) {
@@ -211,6 +288,10 @@ function buildCard(job) {
   return card;
 }
 
+/**
+ * @param {Card} card
+ * @param {Job} job
+ */
 function updateCard(card, job) {
   const r = card.refs;
 
@@ -275,6 +356,10 @@ function updateCard(card, job) {
   updateActions(card, job);
 }
 
+/**
+ * @param {Card} card
+ * @param {Job} job
+ */
 function updateActions(card, job) {
   const r = card.refs;
   if (job.status !== "succeeded") {
@@ -282,7 +367,9 @@ function updateActions(card, job) {
     return;
   }
   // 既に構築済みなら投稿状態だけ更新
-  if (!r.postBtn) {
+  let btn = r.postBtn;
+  let st = r.postStatus;
+  if (!btn || !st) {
     r.actions.textContent = "";
 
     // レビュー結果 (遅延読み込み)
@@ -294,6 +381,7 @@ function updateActions(card, job) {
       if (resultDetails.open && !card.loadedResult) {
         card.loadedResult = true;
         try {
+          /** @type {JobDetail} */
           const d = await fetchJSON(`/api/reviews/${job.id}`);
           resultPre.textContent = d.review_text || "(空)";
         } catch (err) {
@@ -304,8 +392,10 @@ function updateActions(card, job) {
 
     const postBtn = el("button", { text: "PR に投稿" });
     const postStatus = el("span", { class: "post-status" });
-    postBtn.addEventListener("click", () => doPost(job.id, card));
+    postBtn.addEventListener("click", () => doPost(job.id, postBtn, postStatus));
 
+    btn = postBtn;
+    st = postStatus;
     r.postBtn = postBtn;
     r.postStatus = postStatus;
     r.actions.appendChild(el("div", {}, [resultDetails]));
@@ -317,7 +407,6 @@ function updateActions(card, job) {
   }
 
   // 投稿状態
-  const btn = r.postBtn, st = r.postStatus;
   st.className = "post-status";
   if (job.posted) {
     btn.classList.add("hidden");
@@ -340,6 +429,7 @@ function updateActions(card, job) {
   }
 }
 
+/** @param {string} jobId */
 async function doDelete(jobId) {
   if (!confirm("このレビューを履歴から削除しますか?（ログファイルは残ります）")) return;
   try {
@@ -350,19 +440,24 @@ async function doDelete(jobId) {
   }
 }
 
-async function doPost(jobId, card) {
-  const btn = card.refs.postBtn;
+/**
+ * @param {string} jobId
+ * @param {HTMLButtonElement} btn
+ * @param {HTMLSpanElement} status
+ */
+async function doPost(jobId, btn, status) {
   btn.disabled = true;
   try {
     await fetchJSON(`/api/reviews/${jobId}/post`, { method: "POST" });
     await refreshJobs();
   } catch (err) {
-    card.refs.postStatus.className = "post-status err";
-    card.refs.postStatus.textContent = err.message;
+    status.className = "post-status err";
+    status.textContent = err.message;
     btn.disabled = false;
   }
 }
 
+/** @param {ReviewsResponse} data */
 function renderJobs(data) {
   const jobs = data.jobs || [];
   jobEmpty.classList.toggle("hidden", jobs.length > 0);
@@ -375,6 +470,7 @@ function renderJobs(data) {
     busyBanner.classList.add("hidden");
   }
 
+  /** @type {Set<string>} */
   const seen = new Set();
   for (const job of jobs) {
     seen.add(job.id);
@@ -398,6 +494,7 @@ function renderJobs(data) {
 
 async function refreshJobs() {
   try {
+    /** @type {ReviewsResponse} */
     const data = await fetchJSON("/api/reviews");
     renderJobs(data);
   } catch (_) { /* ポーリングの一時的失敗は無視 */ }
@@ -406,21 +503,23 @@ async function refreshJobs() {
 // ---- 集計 ------------------------------------------------------------------
 // 一覧はメタデータだけを取得する。本文は件数に比例して重くなるため、行が
 // 開かれた時点で /api/summary/<id> から個別に読み込む。
-const summaryList = document.getElementById("summary-list");
-const summaryStatus = document.getElementById("summary-status");
-const summaryRepo = document.getElementById("summary-repo");
-const summaryQ = document.getElementById("summary-q");
-const summaryPager = document.getElementById("summary-pager");
-const summaryRange = document.getElementById("summary-range");
-const summaryPrev = document.getElementById("summary-prev");
-const summaryNext = document.getElementById("summary-next");
+const summaryList = /** @type {HTMLDivElement} */ (document.getElementById("summary-list"));
+const summaryStatus = /** @type {HTMLParagraphElement} */ (document.getElementById("summary-status"));
+const summaryRepo = /** @type {HTMLSelectElement} */ (document.getElementById("summary-repo"));
+const summaryQ = /** @type {HTMLInputElement} */ (document.getElementById("summary-q"));
+const summaryPager = /** @type {HTMLDivElement} */ (document.getElementById("summary-pager"));
+const summaryRange = /** @type {HTMLSpanElement} */ (document.getElementById("summary-range"));
+const summaryPrev = /** @type {HTMLButtonElement} */ (document.getElementById("summary-prev"));
+const summaryNext = /** @type {HTMLButtonElement} */ (document.getElementById("summary-next"));
 
 const PAGE_SIZE = 50;
 let summaryOffset = 0;
 let summaryLoading = false;
 let summaryTotal = 0;
 
-document.getElementById("reload-summary").addEventListener("click", () => {
+const reloadSummaryBtn =
+  /** @type {HTMLButtonElement} */ (document.getElementById("reload-summary"));
+reloadSummaryBtn.addEventListener("click", () => {
   summaryOffset = 0;
   loadSummary();
 });
@@ -437,12 +536,17 @@ summaryNext.addEventListener("click", () => {
 });
 
 // 入力のたびに投げず、打ち終わりを待ってから検索する。
-let searchTimer = null;
+/** @type {number | undefined} */
+let searchTimer;
 summaryQ.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => { summaryOffset = 0; loadSummary(); }, 300);
 });
 
+/**
+ * @param {number | null} n
+ * @returns {string}
+ */
 function fmtBytes(n) {
   if (n == null) return "";
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
@@ -459,11 +563,13 @@ async function loadSummary() {
     if (summaryRepo.value) params.set("repo", summaryRepo.value);
     if (summaryQ.value.trim()) params.set("q", summaryQ.value.trim());
 
+    /** @type {SummaryResponse} */
     const data = await fetchJSON("/api/summary?" + params);
     summaryTotal = data.total || 0;
     syncRepoOptions(data.repos || []);
-    renderSummary(data.entries || []);
-    updatePager(data.entries.length);
+    const entries = data.entries || [];
+    renderSummary(entries);
+    updatePager(entries.length);
   } catch (err) {
     summaryStatus.textContent = "読み込みに失敗しました: " + err.message;
   } finally {
@@ -471,6 +577,7 @@ async function loadSummary() {
   }
 }
 
+/** @param {string[]} repos */
 function syncRepoOptions(repos) {
   // 選択中の値は保ったまま、選択肢だけ実データに合わせる。
   const current = summaryRepo.value;
@@ -487,6 +594,7 @@ function syncRepoOptions(repos) {
   summaryRepo.value = repos.includes(current) ? current : "";
 }
 
+/** @param {number} shown */
 function updatePager(shown) {
   if (!summaryTotal) {
     summaryStatus.textContent = "0 件";
@@ -502,12 +610,13 @@ function updatePager(shown) {
   summaryPager.classList.toggle("hidden", summaryTotal <= PAGE_SIZE);
 }
 
+/** @param {SummaryEntry[]} entries */
 function renderSummary(entries) {
   summaryList.textContent = "";
   for (const e of entries) {
     const heading = el("h3", {}, [
       el("a", {
-        href: e.url, text: `${e.repo} #${e.pr_num}` + (e.title ? ` \u2014 ${e.title}` : ""),
+        href: e.url, text: `${e.repo} #${e.pr_num}` + (e.title ? ` — ${e.title}` : ""),
         attrs: { target: "_blank", rel: "noopener" },
       }),
     ]);
@@ -530,6 +639,10 @@ function renderSummary(entries) {
   }
 }
 
+/**
+ * @param {SummaryEntry} entry
+ * @returns {HTMLDivElement}
+ */
 function buildSummaryDetails(entry) {
   const reviewPre = el("pre", { class: "code", text: "開くと読み込みます..." });
   const reviewDetails = el("details", {}, [
@@ -545,6 +658,7 @@ function buildSummaryDetails(entry) {
     if (!reviewDetails.open || loaded) return;
     loaded = true;
     try {
+      /** @type {SummaryDetail} */
       const d = await fetchJSON(`/api/summary/${entry.id}`);
       reviewPre.textContent = d.review_text || "(空)";
       if (d.details) {
