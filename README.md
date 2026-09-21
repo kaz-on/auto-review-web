@@ -94,18 +94,24 @@ docker compose up -d --build
 - `git` / `codex`
 
 認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。`run.sh` は
-起動時にリポジトリ直下の `.env` を読んで export するので、設定は docker compose と
-同じ 1 ファイルで済む（`.env.example` をコピーして埋める）。**`.env` が無いと
-`run.sh` はエラーで終了する。** 環境変数を自分で export して使うなら、空の `.env`
-を置けばよい。
-
-`REVIEW_ORG` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
-拒否される（起動ログに `[warn]` が出る）。
+リポジトリ直下に `.env` があれば読んで export するので、設定は docker compose と
+同じ 1 ファイルで済む。
 
 ```bash
 cp .env.example .env   # 初回のみ。REVIEW_ORG などを埋める
 ./run.sh
 ```
+
+`.env` が無ければ読み込みを飛ばすだけなので、環境変数を自分で export して起動しても
+よい。両方ある場合は `.env` の値が勝つ。
+
+```bash
+export REVIEW_ORG=<your-org>
+./run.sh
+```
+
+`REVIEW_ORG` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
+拒否される（起動ログに `[warn]` が出る）。
 
 初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、
 LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
