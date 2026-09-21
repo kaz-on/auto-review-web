@@ -134,6 +134,38 @@ def test_先行するジョブがあることを知らせる(client):
     assert _post_review(client, number=2).get_json()["was_busy"] is True
 
 
+def test_既定ではレビュー済みの_pr_も再レビューする(client, worker):
+    reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+
+    resp = _post_review(client)
+
+    assert resp.status_code == 201
+    assert resp.get_json()["skipped"] is False
+    assert len(worker.enqueued) == 1
+
+
+def test_レビュー済みの_pr_は指定があれば投入しない(client, worker):
+    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+
+    resp = _post_review(client, skip_if_reviewed=True)
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"skipped": True, "job": None, "review_id": review.id}
+    assert worker.enqueued == []
+
+
+def test_同じ_pr_の実行中のジョブを返して投入しない(client, worker):
+    first = _post_review(client, skip_if_reviewed=True).get_json()
+    assert first["skipped"] is False
+
+    data = _post_review(client, skip_if_reviewed=True).get_json()
+
+    assert data["skipped"] is True
+    assert data["job"]["id"] == first["job"]["id"]
+    assert data["review_id"] is None
+    assert worker.enqueued == [first["job"]["id"]]
+
+
 @pytest.mark.parametrize("body", [{}, {"url": ""}, {"url": "https://example.com/x"}])
 def test_url_が不正なら投入しない(client, worker, body):
     resp = client.post("/api/reviews", json=body)

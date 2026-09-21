@@ -10,7 +10,7 @@ import threading
 
 import pytest
 
-from webreview import db, store
+from webreview import db, reviews, store
 
 pytestmark = pytest.mark.usefixtures("temp_db")
 
@@ -48,6 +48,88 @@ def test_品質改善を含めずに作れる():
     # 投入時に決まる設定なので、あとから書き換えさせない。
     with pytest.raises(ValueError):
         store.update(job.id, include_quality=True)
+
+
+def _create_unless_reviewed(number: int = 1, **kwargs) -> store.Job | store.Duplicate:
+    return store.create_unless_reviewed(
+        url=f"https://github.com/example-org/my-repo/pull/{number}",
+        owner="example-org",
+        repo="my-repo",
+        number=number,
+        **kwargs,
+    )
+
+
+def test_未レビューの_pr_ならジョブを作る():
+    job = _create_unless_reviewed(auto_post=False, include_quality=False)
+
+    assert isinstance(job, store.Job)
+    assert job.status == store.QUEUED
+    assert job.auto_post is False and job.include_quality is False
+
+
+def test_レビュー済みの_pr_ならジョブを作らない():
+    job = _create()
+    older = reviews.create(repo="my-repo", pr_number=1, body="a")
+    newer = reviews.create(repo="my-repo", pr_number=1, body="b")
+    store.update(job.id, status=store.SUCCEEDED, review_id=newer.id)
+    # ジョブ履歴を消してもレビューは残るので、判定は変わらない。
+    store.delete(job.id)
+
+    result = _create_unless_reviewed()
+
+    assert result == store.Duplicate(job=None, review_id=newer.id)
+    assert newer.id > older.id
+    assert [j.id for j in store.list_jobs()] == []
+
+
+@pytest.mark.parametrize("status", [store.QUEUED, store.RUNNING])
+def test_同じ_pr_のジョブが終わっていなければ作らない(status):
+    job = _create()
+    store.update(job.id, status=status)
+
+    result = _create_unless_reviewed()
+
+    assert isinstance(result, store.Duplicate)
+    assert result.job is not None and result.job.id == job.id
+    assert result.review_id is None
+    assert len(store.list_jobs()) == 1
+
+
+def test_失敗したジョブしかなければ作り直す():
+    job = _create()
+    store.update(job.id, status=store.FAILED)
+
+    assert isinstance(_create_unless_reviewed(), store.Job)
+
+
+def test_別の_pr_のレビューは判定に影響しない():
+    reviews.create(repo="my-repo", pr_number=2, body="a")
+    reviews.create(repo="other-repo", pr_number=1, body="a")
+    _create(number=3)
+
+    assert isinstance(_create_unless_reviewed(number=1), store.Job)
+
+
+def test_同時に投入しても同じ_pr_は_1_件しか積まれない():
+    results: list[store.Job | store.Duplicate] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def submit() -> None:
+        barrier.wait()
+        result = _create_unless_reviewed()
+        with lock:
+            results.append(result)
+
+    threads = [threading.Thread(target=submit) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(isinstance(r, store.Job) for r in results) == 1
+    assert len(store.list_jobs()) == 1
 
 
 def test_存在しないジョブは_none():

@@ -111,13 +111,23 @@ def create_app() -> Flask:
 
         auto_post = bool(body.get("auto_post", True))
         include_quality = bool(body.get("include_quality", True))
+        skip_if_reviewed = bool(body.get("skip_if_reviewed", False))
         was_busy = store.has_active()
-        job = store.create(
+        create = store.create_unless_reviewed if skip_if_reviewed else store.create
+        job = create(
             url=pr.url, owner=pr.owner, repo=pr.repo, number=pr.number,
             auto_post=auto_post, include_quality=include_quality,
         )
+        if isinstance(job, store.Duplicate):
+            return jsonify({
+                "skipped": True,
+                "job": _job_public(job.job) if job.job is not None else None,
+                "review_id": job.review_id,
+            })
         worker.enqueue(job.id)
-        return jsonify({"job": _job_public(job), "was_busy": was_busy}), 201
+        return jsonify({
+            "skipped": False, "job": _job_public(job), "was_busy": was_busy,
+        }), 201
 
     @app.get("/api/reviews")
     def list_reviews():

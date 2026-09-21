@@ -49,10 +49,23 @@ interface ReviewsResponse {
   busy: boolean;
 }
 
-/** POST /api/reviews */
+/** POST /api/reviews (201)。投入したジョブを返す。 */
 interface CreateReviewResponse {
+  skipped: false;
   job: Job;
   was_busy: boolean;
+}
+
+/**
+ * POST /api/reviews (200)。skip_if_reviewed を指定し、同じ PR のレビューか
+ * 待機中・実行中のジョブが既にあったため投入しなかった。画面からは指定しない。
+ */
+interface SkippedReviewResponse {
+  skipped: true;
+  /** 待機中・実行中のジョブ。無ければ null。 */
+  job: Job | null;
+  /** 最新のレビュー (reviews.id)。まだ無ければ null。 */
+  review_id: number | null;
 }
 
 /** GET /api/config。いずれも未設定なら空文字 (null にはならない)。 */

@@ -256,7 +256,7 @@ API レスポンスの型は `static/types.d.ts` にまとめてある。これ�
 
 | メソッド / パス | 説明 |
 | --- | --- |
-| `POST /api/reviews` | `{"url": "...", "auto_post": true, "include_quality": true}` でレビューを投入（どちらも既定 `true`） |
+| `POST /api/reviews` | `{"url": "...", "auto_post": true, "include_quality": true, "skip_if_reviewed": false}` でレビューを投入（下記「CI からの投入」） |
 | `GET /api/reviews` | ジョブ一覧と `busy` 状態 |
 | `GET /api/reviews/<id>` | ジョブ詳細（レビュー本文を含む） |
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
@@ -264,6 +264,30 @@ API レスポンスの型は `static/types.d.ts` にまとめてある。これ�
 | `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない |
 | `GET /api/summary/<id>` | レビュー本文と詳細情報 |
 | `GET /api/config` | Organization / モデル名 / reasoning effort / 説明文 |
+
+### CI からの投入
+
+`POST /api/reviews` は画面と同じ API なので、GitHub Actions の self-hosted runner
+などからも投入できる。`auto_post` と `include_quality` は既定で `true`。
+
+`"skip_if_reviewed": true` を付けると、同じ PR を **一度でもレビューしていれば投入
+しない**。PR の更新 (`synchronize`) のたびに呼んでも、レビューは最初の 1 回だけになる。
+
+- 完了したレビューがあるか (`reviews` を見るので、ジョブ履歴を消しても残る)、
+  同じ PR のジョブが待機中・実行中なら見送る。失敗したジョブは数えないので、
+  次の投入でやり直せる。
+- 見送った場合は `200` で `{"skipped": true, "job": <待機中・実行中のジョブ or null>,
+  "review_id": <最新のレビュー or null>}` を返す。投入した場合は `201` で
+  `"skipped": false` とジョブを返す。
+- 判定と投入は同じトランザクションで行うので、同じ PR に対して同時に投入されても
+  二重には積まれない。
+- 指定しない場合 (画面からの投入) は従来どおり毎回レビューする。
+
+```bash
+curl -fsS -X POST "http://<実行PCのIP>:8080/api/reviews" \
+  -H 'Content-Type: application/json' \
+  -d "{\"url\": \"${PR_URL}\", \"skip_if_reviewed\": true}"
+```
 
 ## データの持ち方
 

@@ -165,6 +165,25 @@ def has_active() -> bool:
 
 
 # --- 更新 -------------------------------------------------------------------
+def _insert(
+    conn: sqlite3.Connection,
+    url: str,
+    owner: str,
+    repo: str,
+    number: int,
+    auto_post: bool,
+    include_quality: bool,
+) -> str:
+    job_id = uuid.uuid4().hex[:12]
+    conn.execute(
+        "INSERT INTO jobs (id, url, owner, repo, number, status, created_at, "
+        "auto_post, include_quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (job_id, url, owner, repo, number, QUEUED, time.time(), int(auto_post),
+         int(include_quality)),
+    )
+    return job_id
+
+
 def create(
     url: str,
     owner: str,
@@ -173,14 +192,64 @@ def create(
     auto_post: bool = True,
     include_quality: bool = True,
 ) -> Job:
-    job_id = uuid.uuid4().hex[:12]
-    now = time.time()
     with db.write() as conn:
-        conn.execute(
-            "INSERT INTO jobs (id, url, owner, repo, number, status, created_at, "
-            "auto_post, include_quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, url, owner, repo, number, QUEUED, now, int(auto_post),
-             int(include_quality)),
+        job_id = _insert(conn, url, owner, repo, number, auto_post, include_quality)
+    job = get(job_id)
+    assert job is not None
+    return job
+
+
+@dataclass
+class Duplicate:
+    """create_unless_reviewed が投入を見送ったときの、先にある同じ PR の記録。
+
+    少なくとも一方は None でない。
+    """
+
+    # 待機中・実行中のジョブ。
+    job: Job | None
+    # 最新のレビュー (reviews.id)。
+    review_id: int | None
+
+
+def create_unless_reviewed(
+    url: str,
+    owner: str,
+    repo: str,
+    number: int,
+    auto_post: bool = True,
+    include_quality: bool = True,
+) -> Job | Duplicate:
+    """同じ PR をまだレビューしていなければジョブを作る。
+
+    レビュー済みの判定は reviews を見る (ジョブ履歴を消しても残るため)。まだ
+    終わっていない待機中・実行中のジョブも済みとして扱い、push が続いたときに
+    同じ PR を重ねて積まないようにする。失敗したジョブは数えないので、次の投入で
+    やり直せる。
+
+    reviews は Organization を持たない (REVIEW_ORG で 1 つに固定される) ため、
+    PR はリポジトリ名と番号で照合する。判定と INSERT を同じ書き込みトランザクション
+    で行うので、同時に投入されても二重には積まれない。
+    """
+    with db.write() as conn:
+        active = conn.execute(
+            "SELECT id FROM jobs WHERE repo = ? AND number = ? AND status IN (?, ?) "
+            "ORDER BY created_at DESC LIMIT 1",
+            (repo, number, *_ACTIVE),
+        ).fetchone()
+        review = conn.execute(
+            "SELECT MAX(id) AS id FROM reviews WHERE repo = ? AND pr_number = ?",
+            (repo, number),
+        ).fetchone()
+        if active is None and review["id"] is None:
+            job_id = _insert(conn, url, owner, repo, number, auto_post, include_quality)
+        else:
+            job_id = None
+
+    if job_id is None:
+        return Duplicate(
+            job=get(active["id"]) if active is not None else None,
+            review_id=review["id"],
         )
     job = get(job_id)
     assert job is not None
