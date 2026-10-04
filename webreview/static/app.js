@@ -224,6 +224,7 @@ const busyBanner = /** @type {HTMLDivElement} */ (document.getElementById("busy-
  * @property {boolean} loadedResult
  * @property {boolean} loadedProgress
  * @property {boolean} needsProgressFetch
+ * @property {() => void} fetchProgress
  */
 
 /** @type {Map<string, Card>} */
@@ -263,26 +264,30 @@ function buildCard(job) {
     badge, title, quality, autopost, delBtn, sub, current, errorBox,
     actions, progressPre, progressDetails,
   };
-  /** @type {Card} */
-  const card = {
-    root, refs, loadedResult: false, loadedProgress: false,
-    needsProgressFetch: false,
-  };
-
-  // 終了したジョブの進捗は一覧に含まれないので、開かれた時点で取りに行く。
-  progressDetails.addEventListener("toggle", async () => {
-    if (!progressDetails.open || card.loadedProgress || !card.needsProgressFetch) {
-      return;
-    }
+  // 終了したジョブの進捗は一覧に含まれないので、必要になった時点で取りに行く。
+  // 開かれたときだけでなく、開いたままジョブが終わったときにも呼ばれる。
+  async function fetchProgress() {
+    if (card.loadedProgress || !card.needsProgressFetch) return;
     card.loadedProgress = true;
     try {
       /** @type {JobDetail} */
       const d = await fetchJSON(`/api/reviews/${job.id}`);
       progressPre.textContent = (d.progress || []).join("\n");
     } catch (err) {
+      // 次のポーリングか開き直しで取り直せるように戻す。
       card.loadedProgress = false;
       progressPre.textContent = err.message;
     }
+  }
+
+  /** @type {Card} */
+  const card = {
+    root, refs, loadedResult: false, loadedProgress: false,
+    needsProgressFetch: false, fetchProgress,
+  };
+
+  progressDetails.addEventListener("toggle", () => {
+    if (progressDetails.open) fetchProgress();
   });
 
   return card;
@@ -333,6 +338,9 @@ function updateCard(card, job) {
   // 終了したジョブの進捗は一覧に載らない (progress は null)。開かれた時点で取得する。
   if (!job.progress && job.progress_count && !card.loadedProgress) {
     card.needsProgressFetch = true;
+    // 実行中から開いたままだと toggle が起きないので、ここで取りに行く。
+    // 同期的に loadedProgress が立つので、下のプレースホルダには入れ替わらない。
+    if (r.progressDetails.open) card.fetchProgress();
   }
 
   // エラー
