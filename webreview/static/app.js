@@ -656,28 +656,40 @@ function buildSummaryDetails(entry) {
   const reviewDetails = el("details", {}, [
     el("summary", { text: "レビュー結果を表示" }), reviewPre,
   ]);
-  const detailsPre = el("pre", { class: "code" });
-  const detailsBox = el("details", { class: "hidden" }, [
+  const detailsPre = el("pre", { class: "code", text: "開くと読み込みます..." });
+  // 詳細の有無は一覧の has_details で分かるので、本文を開く前から出しておく。
+  const detailsBox = el("details", entry.has_details ? {} : { class: "hidden" }, [
     el("summary", { text: "詳細情報" }), detailsPre,
   ]);
 
-  let loaded = false;
-  reviewDetails.addEventListener("toggle", async () => {
-    if (!reviewDetails.open || loaded) return;
-    loaded = true;
-    try {
-      /** @type {SummaryDetail} */
-      const d = await fetchJSON(`/api/summary/${entry.id}`);
-      reviewPre.textContent = d.review_text || "(空)";
-      if (d.details) {
-        detailsPre.textContent = d.details;
-        detailsBox.classList.remove("hidden");
+  // 本文と詳細は同じエンドポイントから来る。どちらを先に開いても取得は 1 回で
+  // 済むように共有し、失敗したら次に開いたときに取り直す。
+  /** @type {Promise<SummaryDetail> | null} */
+  let pending = null;
+
+  /**
+   * @param {HTMLDetailsElement} box
+   * @param {HTMLPreElement} pre
+   * @param {(detail: SummaryDetail) => string} pick
+   */
+  function bindLoad(box, pre, pick) {
+    let loaded = false;
+    box.addEventListener("toggle", async () => {
+      if (!box.open || loaded) return;
+      loaded = true;
+      try {
+        if (!pending) pending = fetchJSON(`/api/summary/${entry.id}`);
+        pre.textContent = pick(await pending);
+      } catch (err) {
+        loaded = false;
+        pending = null;
+        pre.textContent = err.message;
       }
-    } catch (err) {
-      loaded = false;
-      reviewPre.textContent = err.message;
-    }
-  });
+    });
+  }
+
+  bindLoad(reviewDetails, reviewPre, (d) => d.review_text || "(空)");
+  bindLoad(detailsBox, detailsPre, (d) => d.details || "(なし)");
 
   return el("div", {}, [reviewDetails, detailsBox]);
 }
