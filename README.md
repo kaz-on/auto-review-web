@@ -169,7 +169,7 @@ python3 -m venv .venv
 | `GITHUB_APP_PRIVATE_KEY` | （空） | 秘密鍵を PEM 文字列で渡す場合 |
 | `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決 |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
-| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
+| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。通常は変更不要（PR や clone の URL は github.com 固定のため、変えても GitHub Enterprise Server には対応しない） |
 | `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名） |
 | `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |

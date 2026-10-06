@@ -42,7 +42,8 @@ REVIEW_DESCRIPTION = os.environ.get("REVIEW_DESCRIPTION", "").replace("\\n", "\n
 # "app" = GitHub App の秘密鍵から installation access token を都度発行する。
 GITHUB_AUTH_MODE = os.environ.get("GITHUB_AUTH_MODE", "pat").strip().lower()
 
-# GitHub REST API のベース URL (GitHub Enterprise Server では変更する)。
+# GitHub REST API のベース URL。PR や clone の URL は github.com 固定なので、
+# これを変えても GitHub Enterprise Server には対応しない。
 GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
 # pat モード用。
