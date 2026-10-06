@@ -27,7 +27,7 @@ def test_保存した内容がそのまま読み出せる():
         base_ref="main",
         base_commit="deadbeef",
         head_commit="cafebabe",
-        model="gpt-5.6-terra",
+        model="gpt-6.1-sol",
         reasoning_effort="medium",
         codex_version="1.2.3",
         session_id="0199",
@@ -41,7 +41,7 @@ def test_保存した内容がそのまま読み出せる():
     assert got.base_ref == "main"
     assert got.base_commit == "deadbeef"
     assert got.head_commit == "cafebabe"
-    assert got.model == "gpt-5.6-terra"
+    assert got.model == "gpt-6.1-sol"
     assert got.codex_version == "1.2.3"
     assert got.session_id == "0199"
     assert got.details == "バナー"
@@ -89,10 +89,10 @@ def test_err_ログの置き場所を後から結び付けられる(tmp_path):
 
 # --- 表示・投稿用の整形 -----------------------------------------------------
 def test_ヘッダはカラムから毎回組み立てる():
-    review = _create(model="gpt-5.6-terra", reasoning_effort="medium")
+    review = _create(model="gpt-6.1-sol", reasoning_effort="medium")
 
     assert reviews.header_line(review) == (
-        "codex review (gpt-5.6-terra, reasoning=medium, rev-0):"
+        "codex review (gpt-6.1-sol, reasoning=medium, rev-0):"
     )
 
 

@@ -147,7 +147,7 @@ python3 -m venv .venv
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
 | `REVIEW_ORG` | （空） | **必須。** 許可する GitHub Organization |
-| `REVIEW_MODEL` | `gpt-5.6-terra` | codex のレビューモデル |
+| `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |

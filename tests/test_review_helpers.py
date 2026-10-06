@@ -91,7 +91,7 @@ BANNER = """\
 OpenAI Codex v1.2.3 (research preview)
 --------
 workdir: /work
-model: gpt-5.6-terra
+model: gpt-6.1-sol
 reasoning effort: medium
 session id: 0199-abcd
 --------
@@ -108,7 +108,7 @@ def test_err_ログの先頭から実行条件とバナー項目を取り出す(
 
     assert fields == {
         "codex_version": "1.2.3",
-        "model": "gpt-5.6-terra",
+        "model": "gpt-6.1-sol",
         "reasoning_effort": "medium",
         "session_id": "0199-abcd",
     }
@@ -119,12 +119,12 @@ def test_err_ログの先頭から実行条件とバナー項目を取り出す(
 
 def test_バナーに項目が欠けていても読める(tmp_path):
     path = tmp_path / "err.log"
-    path.write_text("model: gpt-5.6-terra\nexec\n")
+    path.write_text("model: gpt-6.1-sol\nexec\n")
 
     details, fields = review.read_err_header(path)
 
-    assert fields == {"model": "gpt-5.6-terra"}
-    assert details == "model: gpt-5.6-terra"
+    assert fields == {"model": "gpt-6.1-sol"}
+    assert details == "model: gpt-6.1-sol"
 
 
 def test_exec_が現れないログでも_max_lines_で打ち切る(tmp_path):
@@ -167,7 +167,7 @@ def test_tail_はファイルが無ければ空文字(tmp_path):
 # --- codex の起動引数 --------------------------------------------------------
 def test_codex_の引数に承認不要と読み取り専用サンドボックスを含める(monkeypatch):
     monkeypatch.setattr(config, "CODEX_BIN", "codex")
-    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-5.6-terra")
+    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-6.1-sol")
     monkeypatch.setattr(config, "REVIEW_REASONING_EFFORT", "high")
 
     args = review._codex_args("PROMPT")
@@ -189,10 +189,10 @@ def test_推論の深さが空ならオプションを渡さない(monkeypatch):
 
 
 def test_モデル表記に推論の深さを併記する(monkeypatch):
-    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-5.6-terra")
+    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-6.1-sol")
     monkeypatch.setattr(config, "REVIEW_REASONING_EFFORT", "low")
 
-    assert review._model_label() == "gpt-5.6-terra, reasoning=low"
+    assert review._model_label() == "gpt-6.1-sol, reasoning=low"
 
 
 # --- 環境変数 ----------------------------------------------------------------

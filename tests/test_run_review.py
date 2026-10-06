@@ -29,7 +29,7 @@ def fake_codex(tmp_path, monkeypatch):
         #!/usr/bin/env python3
         import sys
         print("OpenAI Codex v1.2.3", file=sys.stderr)
-        print("model: gpt-5.6-terra", file=sys.stderr)
+        print("model: gpt-6.1-sol", file=sys.stderr)
         print("reasoning effort: medium", file=sys.stderr)
         print("session id: 0199-abcd", file=sys.stderr)
         print("exec", file=sys.stderr)
@@ -92,7 +92,7 @@ def test_レビューを最後まで実行して保存する(
     assert result.base_commit == "basecommit1234"
     # レビューした版を残しておき、投稿時に行コメントの commit_id として使う。
     assert result.head_commit == "headcommit5678"
-    assert result.model == "gpt-5.6-terra"
+    assert result.model == "gpt-6.1-sol"
     assert result.reasoning_effort == "medium"
     assert result.codex_version == "1.2.3"
     assert result.session_id == "0199-abcd"

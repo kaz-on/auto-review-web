@@ -89,13 +89,13 @@ def test_静的ファイルを返す(client):
 
 # --- 設定 -------------------------------------------------------------------
 def test_画面に必要な設定を返す(client, monkeypatch):
-    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-5.6-terra")
+    monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-6.1-sol")
     monkeypatch.setattr(config, "REVIEW_DESCRIPTION", "説明文")
 
     data = client.get("/api/config").get_json()
 
     assert data["org"] == "example-org"
-    assert data["model"] == "gpt-5.6-terra"
+    assert data["model"] == "gpt-6.1-sol"
     assert data["description"] == "説明文"
     # トークンや秘密鍵は返さない。
     assert set(data) == {"org", "model", "reasoning_effort", "description"}
