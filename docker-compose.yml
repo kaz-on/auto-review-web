@@ -7,8 +7,9 @@ services:
     # tini を PID 1 にして、シグナルの転送と子プロセス (codex など) の回収を任せる。
     init: true
     ports:
-      # ホスト側ポートは REVIEW_PORT で変更可 (既定 8080)。
-      - "${REVIEW_PORT:-8080}:8080"
+      # ホスト側の待ち受けアドレスとポートは REVIEW_HOST / REVIEW_PORT で変更可
+      # (既定 127.0.0.1:8080)。LAN 内のほかの PC から使うなら REVIEW_HOST=0.0.0.0。
+      - "${REVIEW_HOST:-127.0.0.1}:${REVIEW_PORT:-8080}:8080"
     environment:
       # 認証 (ホストの認証ディレクトリは共有しない)
       # GITHUB_AUTH_MODE=pat なら GH_TOKEN、app なら GITHUB_APP_* を使う。
@@ -25,6 +26,10 @@ services:
       REVIEW_DESCRIPTION: ${REVIEW_DESCRIPTION:-}
       REVIEW_TIMEOUT: ${REVIEW_TIMEOUT:-3600}
       REVIEW_STDERR_RETENTION_DAYS: ${REVIEW_STDERR_RETENTION_DAYS:-30}
+      # コンテナ内では ports の転送先で待ち受ける。.env の REVIEW_HOST / REVIEW_PORT は
+      # ホスト側の設定なので、ここで固定値に上書きする。
+      REVIEW_HOST: 0.0.0.0
+      REVIEW_PORT: 8080
     volumes:
       # git リポジトリと、DB + codex の生ログを volume で永続化する。
       - review_repos:/data/work

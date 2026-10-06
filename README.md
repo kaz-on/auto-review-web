@@ -26,10 +26,9 @@ PR への投稿・履歴の削除ができる。PR への投稿は設定した G
 
 - 信頼できる LAN 内だけで使い、インターネットには公開しない。外から使う場合は、
   認証付きのリバースプロキシや VPN の後ろに置く。
-- 既定ではホストのすべてのネットワークインターフェースで待ち受ける。自分の PC
-  からだけ使うなら、docker compose では `docker-compose.yml` の `ports` を
-  `"127.0.0.1:${REVIEW_PORT:-8080}:8080"` に、ホストで直接起動する場合は
-  `REVIEW_HOST=127.0.0.1` にする。
+- 既定では実行している PC 自身（`127.0.0.1`）からしか接続できない。LAN 内の
+  ほかの PC から使う場合は `REVIEW_HOST=0.0.0.0` にする（docker compose でも
+  ホストで直接起動する場合でも同じ）。
 - レビューできるのは `REVIEW_OWNER` のリポジトリへの PR に限られる。ただし codex は
   PR のコードや説明文を読むので、fork から出された PR のように信頼できない人が書いた
   内容は、レビュー結果に影響しうる（プロンプトインジェクション）。codex は
@@ -90,7 +89,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-起動後、LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
+起動後、ブラウザから `http://localhost:8080/` でアクセスする。LAN 内のほかの PC から
+使う場合は、`.env` に `REVIEW_HOST=0.0.0.0` を設定して `http://<実行PCのIP>:8080/` で
+アクセスする（上記「セキュリティ上の注意」）。
 
 - 認証: 上記「GitHub 認証」の設定と `CODEX_API_KEY`（Codex CLI）。
   いずれも `.env` から環境変数として渡す。
@@ -131,8 +132,9 @@ export REVIEW_OWNER=<your-org-or-user>
 `REVIEW_OWNER` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
 拒否される（起動ログに `[warn]` が出る）。
 
-初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、
-LAN 内の任意の PC のブラウザから `http://<実行PCのIP>:8080/` でアクセスする。
+初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、ブラウザから
+`http://localhost:8080/` でアクセスする。LAN 内のほかの PC から使う場合は
+`REVIEW_HOST=0.0.0.0` を設定する（Docker の場合と同じ）。
 
 手動で起動する場合:
 
@@ -173,7 +175,7 @@ python3 -m venv .venv
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリの作業ディレクトリ |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | codex の生ログのルート |
 | `REVIEW_DB_PATH` | `data/review.db` | SQLite データベースの位置 |
-| `REVIEW_HOST` | `0.0.0.0` | 待ち受けアドレス |
+| `REVIEW_HOST` | `127.0.0.1` | 待ち受けアドレス。LAN に公開するなら `0.0.0.0` |
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
 | `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
 

@@ -89,7 +89,8 @@ REVIEW_TIMEOUT = int(os.environ.get("REVIEW_TIMEOUT", "3600"))
 
 
 # --- サーバ ------------------------------------------------------------------
-HOST = os.environ.get("REVIEW_HOST", "0.0.0.0")
+# 認証が無いため、既定では実行している PC 自身からしか接続できないようにする。
+HOST = os.environ.get("REVIEW_HOST", "127.0.0.1")
 PORT = int(os.environ.get("REVIEW_PORT", "8080"))
 
 
