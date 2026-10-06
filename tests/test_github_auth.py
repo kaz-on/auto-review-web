@@ -107,7 +107,7 @@ def test_invalidate_すると次回に取り直す(api_calls, fake_jwt):
     assert provider.token() == "ghs_2"
 
 
-def test_installation_id_未指定なら_org_から解決して以後使い回す(
+def test_installation_id_未指定なら_owner_から解決して以後使い回す(
     api_calls, fake_jwt, monkeypatch
 ):
     calls, _ = api_calls
@@ -127,14 +127,59 @@ def test_installation_id_未指定なら_org_から解決して以後使い回�
     ]
 
 
-def test_app_が_org_に入っていなければ分かる形で失敗する(monkeypatch, fake_jwt):
+def _not_found(path: str) -> github_api.ApiError:
+    return github_api.ApiError(f"GitHub API がエラーを返しました (GET {path}, HTTP 404)", status=404)
+
+
+def test_org_で見つからなければ個人アカウントとして引き直す(monkeypatch, fake_jwt):
+    """/orgs/{org}/installation は Organization 専用で、個人アカウントには使えない。"""
+    monkeypatch.setattr(config, "REVIEW_ORG", "some-user")
+    paths: list[str] = []
+
+    def fake_api_request(method, path, *, authorization, body=None):
+        paths.append(path)
+        if path == "/orgs/some-user/installation":
+            raise _not_found(path)
+        if path == "/users/some-user/installation":
+            return {"id": 777}
+        return {"token": "ghs_1", "expires_at": "2099-01-01T00:00:00Z"}
+
+    monkeypatch.setattr(github_api, "api_request", fake_api_request)
+
+    assert _provider().token() == "ghs_1"
+    assert paths == [
+        "/orgs/some-user/installation",
+        "/users/some-user/installation",
+        "/app/installations/777/access_tokens",
+    ]
+
+
+def test_app_が_owner_に入っていなければ分かる形で失敗する(monkeypatch, fake_jwt):
     monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
-    monkeypatch.setattr(
-        github_api, "api_request", lambda *a, **k: {},
-    )
+
+    def fake_api_request(method, path, *, authorization, body=None):
+        raise _not_found(path)
+
+    monkeypatch.setattr(github_api, "api_request", fake_api_request)
 
     with pytest.raises(ReviewError, match="インストールされていません"):
         _provider().token()
+
+
+def test_404_以外のエラーは引き直さずにそのまま返す(monkeypatch, fake_jwt):
+    """JWT の不備などを「インストールされていない」と取り違えない。"""
+    monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
+    paths: list[str] = []
+
+    def fake_api_request(method, path, *, authorization, body=None):
+        paths.append(path)
+        raise github_api.ApiError("A JSON web token could not be decoded", status=401)
+
+    monkeypatch.setattr(github_api, "api_request", fake_api_request)
+
+    with pytest.raises(github_api.ApiError, match="JSON web token"):
+        _provider().token()
+    assert paths == ["/orgs/example-org/installation"]
 
 
 def test_token_が返らなければ失敗させる(monkeypatch, fake_jwt):

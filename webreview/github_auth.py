@@ -96,23 +96,30 @@ class AppTokenProvider:
         return data["token"], _parse_expires_at(data.get("expires_at"))
 
     def _resolve_installation_id(self, jwt_token: str) -> str:
-        """未指定なら REVIEW_ORG の installation を引いて以後キャッシュする。"""
+        """未指定なら REVIEW_ORG の installation を引いて以後キャッシュする。
+
+        installation を引くエンドポイントはアカウントの種類ごとに分かれている。
+        Organization として引いて見つからなければ (404)、個人アカウントとして引き直す。
+        """
         if self._installation_id:
             return self._installation_id
 
-        data = github_api.api_request(
-            "GET",
-            f"/orgs/{config.REVIEW_ORG}/installation",
-            authorization=f"Bearer {jwt_token}",
-        )
-        installation_id = str((data or {}).get("id") or "")
-        if not installation_id:
-            raise ReviewError(
-                f"GitHub App が Organization ({config.REVIEW_ORG}) に "
-                "インストールされていません。"
-            )
-        self._installation_id = installation_id
-        return installation_id
+        owner = config.REVIEW_ORG
+        for path in (f"/orgs/{owner}/installation", f"/users/{owner}/installation"):
+            try:
+                data = github_api.api_request(
+                    "GET", path, authorization=f"Bearer {jwt_token}"
+                )
+            except github_api.ApiError as e:
+                if e.status != 404:
+                    raise
+                continue
+            installation_id = str((data or {}).get("id") or "")
+            if installation_id:
+                self._installation_id = installation_id
+                return installation_id
+
+        raise ReviewError(f"GitHub App が {owner} にインストールされていません。")
 
     def _build_jwt(self) -> str:
         try:
