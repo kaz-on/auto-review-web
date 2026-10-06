@@ -5,6 +5,10 @@ LAN 内の PC からブラウザで使える、[Codex CLI](https://github.com/op
 
 Codex の実行には OpenAI の API キーが必要で、レビューのたびに API 料金がかかる。
 
+レビューの対象は GitHub（github.com）のプルリクエストだけ。GitLab などほかの
+サービスや GitHub Enterprise Server のリポジトリ、PR になっていないブランチや
+コミットはレビューできない。
+
 ## できること
 
 - ブラウザから PR の URL を入力してレビューを実行できる。
