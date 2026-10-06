@@ -74,9 +74,9 @@ def reset_auth_provider():
 
 
 @pytest.fixture
-def review_org(monkeypatch):
-    """レビュー対象 Organization を固定する。"""
-    monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
+def review_owner(monkeypatch):
+    """レビュー対象のオーナーを固定する。"""
+    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
     return "example-org"
 
 

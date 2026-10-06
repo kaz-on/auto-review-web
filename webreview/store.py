@@ -227,7 +227,7 @@ def create_unless_reviewed(
     同じ PR を重ねて積まないようにする。失敗したジョブは数えないので、次の投入で
     やり直せる。
 
-    reviews は Organization を持たない (REVIEW_ORG で 1 つに固定される) ため、
+    reviews はオーナーを持たない (REVIEW_OWNER で 1 つに固定される) ため、
     PR はリポジトリ名と番号で照合する。判定と INSERT を同じ書き込みトランザクション
     で行うので、同時に投入されても二重には積まれない。
     """

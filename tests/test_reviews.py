@@ -127,7 +127,7 @@ def test_一覧は新しい順で本文を含まない():
     assert entries[1]["body_bytes"] == len(("あ" * 10).encode("utf-8"))
 
 
-def test_一覧の_url_は_review_org_から組み立てる(review_org):
+def test_一覧の_url_は_review_owner_から組み立てる(review_owner):
     _create(repo="my-repo", pr_number=42)
 
     assert reviews.list_summary()[0]["url"] == (
@@ -271,7 +271,7 @@ def _pull(title: str) -> github_api.PullRequest:
     )
 
 
-def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_org):
+def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_owner):
     _create(repo="my-repo", pr_number=1)
     _create(repo="my-repo", pr_number=2)
     reviews.put_title("my-repo", 2, "取得済み")
@@ -289,7 +289,7 @@ def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_org):
     assert reviews.cached_title("my-repo", 1) == "PR 1"
 
 
-def test_取得件数に上限を設ける(monkeypatch, review_org):
+def test_取得件数に上限を設ける(monkeypatch, review_owner):
     for n in range(5):
         _create(pr_number=n)
 
@@ -302,7 +302,7 @@ def test_取得件数に上限を設ける(monkeypatch, review_org):
     assert reviews.refresh_titles(limit=2) == 2
 
 
-def test_一部の取得に失敗しても集計は成立させる(monkeypatch, review_org):
+def test_一部の取得に失敗しても集計は成立させる(monkeypatch, review_owner):
     _create(pr_number=1)
     _create(pr_number=2)
 

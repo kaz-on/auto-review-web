@@ -96,7 +96,7 @@ class AppTokenProvider:
         return data["token"], _parse_expires_at(data.get("expires_at"))
 
     def _resolve_installation_id(self, jwt_token: str) -> str:
-        """未指定なら REVIEW_ORG の installation を引いて以後キャッシュする。
+        """未指定なら REVIEW_OWNER の installation を引いて以後キャッシュする。
 
         installation を引くエンドポイントはアカウントの種類ごとに分かれている。
         Organization として引いて見つからなければ (404)、個人アカウントとして引き直す。
@@ -104,7 +104,7 @@ class AppTokenProvider:
         if self._installation_id:
             return self._installation_id
 
-        owner = config.REVIEW_ORG
+        owner = config.REVIEW_OWNER
         for path in (f"/orgs/{owner}/installation", f"/users/{owner}/installation"):
             try:
                 data = github_api.api_request(

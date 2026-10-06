@@ -31,16 +31,16 @@ def _job_public(job: store.Job) -> dict[str, Any]:
     return data
 
 
-def _check_review_org() -> None:
-    """REVIEW_ORG の設定漏れを起動時のログで気付けるようにする。
+def _check_review_owner() -> None:
+    """REVIEW_OWNER の設定漏れを起動時のログで気付けるようにする。
 
     _check_github_auth と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
     に parse_pr_url が画面へエラーを出す。
     """
-    if config.REVIEW_ORG:
-        print(f"[info] レビュー対象 Organization: {config.REVIEW_ORG}", flush=True)
+    if config.REVIEW_OWNER:
+        print(f"[info] レビュー対象のオーナー: {config.REVIEW_OWNER}", flush=True)
     else:
-        print("[warn] REVIEW_ORG が未設定です。レビューは実行できません。", flush=True)
+        print("[warn] REVIEW_OWNER が未設定です。レビューは実行できません。", flush=True)
 
 
 def _check_github_auth() -> None:
@@ -76,7 +76,7 @@ def create_app() -> Flask:
     if pruned:
         print(f"[info] 期限切れの codex ログを {pruned} 件削除しました。", flush=True)
 
-    _check_review_org()
+    _check_review_owner()
     _check_github_auth()
     worker.start()
 
@@ -95,7 +95,7 @@ def create_app() -> Flask:
     @app.get("/api/config")
     def api_config():
         return jsonify({
-            "org": config.REVIEW_ORG,
+            "owner": config.REVIEW_OWNER,
             "model": config.REVIEW_MODEL,
             "reasoning_effort": config.REVIEW_REASONING_EFFORT,
             "description": config.REVIEW_DESCRIPTION,

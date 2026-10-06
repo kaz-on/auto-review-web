@@ -111,7 +111,7 @@ def test_installation_id_未指定なら_owner_から解決して以後使い回
     api_calls, fake_jwt, monkeypatch
 ):
     calls, _ = api_calls
-    monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
+    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
     provider = _provider()
 
     provider.token()
@@ -133,7 +133,7 @@ def _not_found(path: str) -> github_api.ApiError:
 
 def test_org_で見つからなければ個人アカウントとして引き直す(monkeypatch, fake_jwt):
     """/orgs/{org}/installation は Organization 専用で、個人アカウントには使えない。"""
-    monkeypatch.setattr(config, "REVIEW_ORG", "some-user")
+    monkeypatch.setattr(config, "REVIEW_OWNER", "some-user")
     paths: list[str] = []
 
     def fake_api_request(method, path, *, authorization, body=None):
@@ -155,7 +155,7 @@ def test_org_で見つからなければ個人アカウントとして引き直�
 
 
 def test_app_が_owner_に入っていなければ分かる形で失敗する(monkeypatch, fake_jwt):
-    monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
+    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
 
     def fake_api_request(method, path, *, authorization, body=None):
         raise _not_found(path)
@@ -168,7 +168,7 @@ def test_app_が_owner_に入っていなければ分かる形で失敗する(mo
 
 def test_404_以外のエラーは引き直さずにそのまま返す(monkeypatch, fake_jwt):
     """JWT の不備などを「インストールされていない」と取り違えない。"""
-    monkeypatch.setattr(config, "REVIEW_ORG", "example-org")
+    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
     paths: list[str] = []
 
     def fake_api_request(method, path, *, authorization, body=None):

@@ -36,7 +36,7 @@ def worker(monkeypatch):
 
 
 @pytest.fixture
-def client(temp_db, temp_paths, review_org, worker, monkeypatch):
+def client(temp_db, temp_paths, review_owner, worker, monkeypatch):
     # 集計を開くたびに GitHub を叩きに行かないようにする。
     monkeypatch.setattr(reviews, "refresh_titles_async", lambda *a, **k: None)
     app = server.create_app()
@@ -62,7 +62,7 @@ def test_起動時にスキーマを作りワーカーを立ち上げる(client,
 
 
 def test_起動時に未完了のジョブを失敗にする(
-    temp_db, temp_paths, review_org, worker, monkeypatch
+    temp_db, temp_paths, review_owner, worker, monkeypatch
 ):
     job = store.create(
         url="u", owner="example-org", repo="my-repo", number=1,
@@ -94,11 +94,11 @@ def test_画面に必要な設定を返す(client, monkeypatch):
 
     data = client.get("/api/config").get_json()
 
-    assert data["org"] == "example-org"
+    assert data["owner"] == "example-org"
     assert data["model"] == "gpt-6.1-sol"
     assert data["description"] == "説明文"
     # トークンや秘密鍵は返さない。
-    assert set(data) == {"org", "model", "reasoning_effort", "description"}
+    assert set(data) == {"owner", "model", "reasoning_effort", "description"}
 
 
 # --- レビューの投入 ---------------------------------------------------------
@@ -175,7 +175,7 @@ def test_url_が不正なら投入しない(client, worker, body):
     assert worker.enqueued == []
 
 
-def test_対象外の_organization_は投入しない(client, worker):
+def test_対象外のオーナーは投入しない(client, worker):
     resp = client.post(
         "/api/reviews", json={"url": "https://github.com/other-org/r/pull/1"}
     )
@@ -416,7 +416,7 @@ def test_存在しないレビューの詳細は_404(client):
 
 
 def test_集計を開いてもタイトル取得を待たない(
-    temp_db, temp_paths, review_org, worker, monkeypatch
+    temp_db, temp_paths, review_owner, worker, monkeypatch
 ):
     calls: list[int] = []
     monkeypatch.setattr(reviews, "refresh_titles_async", lambda *a, **k: calls.append(1))

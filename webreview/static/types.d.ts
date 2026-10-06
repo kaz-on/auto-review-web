@@ -70,7 +70,7 @@ interface SkippedReviewResponse {
 
 /** GET /api/config。いずれも未設定なら空文字 (null にはならない)。 */
 interface ConfigResponse {
-  org: string;
+  owner: string;
   model: string;
   reasoning_effort: string;
   description: string;

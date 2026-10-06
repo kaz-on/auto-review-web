@@ -183,7 +183,7 @@ def list_summary(
             "pr_num": row["pr_number"],
             "rev": row["rev"],
             "created_at": row["created_at"],
-            "url": f"https://github.com/{config.REVIEW_ORG}/{row['repo']}"
+            "url": f"https://github.com/{config.REVIEW_OWNER}/{row['repo']}"
                    f"/pull/{row['pr_number']}",
             "title": row["title"] or "",
             "model": row["model"],
@@ -314,7 +314,7 @@ def refresh_titles(limit: int = 20) -> int:
         try:
             pull = github_api.get_pull(
                 github_auth.get_provider(),
-                config.REVIEW_ORG,
+                config.REVIEW_OWNER,
                 row["repo"],
                 row["pr_number"],
             )

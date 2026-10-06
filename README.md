@@ -37,13 +37,13 @@ GitHub へのアクセスは REST API と `git` で行うため、GitHub CLI (`g
 
 GitHub App の秘密鍵から installation access token を都度発行する。App には
 **Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、
-`REVIEW_ORG` の Organization にインストールしておく。
+`REVIEW_OWNER` のアカウント（Organization または個人アカウント）にインストールしておく。
 
 ```ini
 GITHUB_AUTH_MODE=app
 GITHUB_APP_CLIENT_ID=Iv23li...              # App の Client ID（App ID でも可）
 GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem
-GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_ORG から自動解決
+GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決
 ```
 
 秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを
@@ -68,7 +68,7 @@ Codex CLI はイメージに含まれ、認証は環境変数で渡す
 
 ```bash
 cp .env.example .env
-# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、CODEX_API_KEY、REVIEW_ORG を設定する
+# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、CODEX_API_KEY、REVIEW_OWNER を設定する
 docker compose up -d --build
 ```
 
@@ -98,7 +98,7 @@ docker compose up -d --build
 同じ 1 ファイルで済む。
 
 ```bash
-cp .env.example .env   # 初回のみ。REVIEW_ORG などを埋める
+cp .env.example .env   # 初回のみ。REVIEW_OWNER などを埋める
 ./run.sh
 ```
 
@@ -106,11 +106,11 @@ cp .env.example .env   # 初回のみ。REVIEW_ORG などを埋める
 よい。両方ある場合は `.env` の値が勝つ。
 
 ```bash
-export REVIEW_ORG=<your-org>
+export REVIEW_OWNER=<your-org-or-user>
 ./run.sh
 ```
 
-`REVIEW_ORG` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
+`REVIEW_OWNER` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて
 拒否される（起動ログに `[warn]` が出る）。
 
 初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、
@@ -143,10 +143,10 @@ python3 -m venv .venv
 | `GITHUB_APP_CLIENT_ID` | （空） | `app` モードの Client ID（App ID も可） |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
 | `GITHUB_APP_PRIVATE_KEY` | （空） | 秘密鍵を PEM 文字列で渡す場合 |
-| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_ORG` から自動解決 |
+| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決 |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL |
-| `REVIEW_ORG` | （空） | **必須。** 許可する GitHub Organization |
+| `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名） |
 | `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
@@ -166,7 +166,7 @@ python3 -m venv .venv
 
 ## 説明文の書式（`REVIEW_DESCRIPTION`）
 
-`REVIEW_DESCRIPTION` を設定すると、画面上部（Organization / モデル表示の下）に
+`REVIEW_DESCRIPTION` を設定すると、画面上部（オーナー / モデル表示の下）に
 説明欄が出る。レビューの概要や説明ページへのリンクを載せる用途を想定している。
 未設定なら欄そのものが表示されない。
 
@@ -263,7 +263,7 @@ API レスポンスの型は `static/types.d.ts` にまとめてある。これ�
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |
 | `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない |
 | `GET /api/summary/<id>` | レビュー本文と詳細情報 |
-| `GET /api/config` | Organization / モデル名 / reasoning effort / 説明文 |
+| `GET /api/config` | オーナー / モデル名 / reasoning effort / 説明文 |
 
 ### CI からの投入
 

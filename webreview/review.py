@@ -89,7 +89,7 @@ class CodexRun:
 
 
 def parse_pr_url(pr_url: str) -> ParsedPR:
-    """PR URL を owner/repo/number に分解し、Organization 制約を検証する。"""
+    """PR URL を owner/repo/number に分解し、オーナーの制約を検証する。"""
     pr_url = (pr_url or "").strip()
     if not pr_url:
         raise ReviewError("PR の URL を入力してください。")
@@ -99,13 +99,13 @@ def parse_pr_url(pr_url: str) -> ParsedPR:
         raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
 
     owner, repo, number = m.group(1), m.group(2), int(m.group(3))
-    if not config.REVIEW_ORG:
+    if not config.REVIEW_OWNER:
         raise ReviewError(
-            "REVIEW_ORG が設定されていません。管理者に連絡してください。"
+            "REVIEW_OWNER が設定されていません。管理者に連絡してください。"
         )
-    if owner != config.REVIEW_ORG:
+    if owner != config.REVIEW_OWNER:
         raise ReviewError(
-            f"リポジトリの Organization ({owner}) が {config.REVIEW_ORG} ではありません。"
+            f"リポジトリのオーナー ({owner}) が {config.REVIEW_OWNER} ではありません。"
         )
     return ParsedPR(owner=owner, repo=repo, number=number)
 

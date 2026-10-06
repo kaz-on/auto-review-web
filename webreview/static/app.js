@@ -150,7 +150,7 @@ fetchJSON("/api/config").then((/** @type {ConfigResponse} */ cfg) => {
     ? `${cfg.model}（reasoning: ${cfg.reasoning_effort}）`
     : cfg.model;
   const meta = /** @type {HTMLElement} */ (document.getElementById("config-meta"));
-  meta.textContent = `対象 Organization: ${cfg.org} / モデル: ${model}`;
+  meta.textContent = `対象: ${cfg.owner} / モデル: ${model}`;
   renderDescription(cfg.description);
 }).catch(() => {});
 

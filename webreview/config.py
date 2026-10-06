@@ -20,9 +20,10 @@ def _env_path(name: str, default: Path) -> Path:
 
 
 # --- レビュー対象の制約 ------------------------------------------------------
-# 許可する GitHub Organization。これ以外のリポジトリはレビューできない。
+# 許可するリポジトリのオーナー (Organization 名または個人アカウント名)。
+# これ以外のリポジトリはレビューできない。
 # 必須。未設定 (空) のときはどのリポジトリもレビューできない (fail-closed)。
-REVIEW_ORG = os.environ.get("REVIEW_ORG", "").strip()
+REVIEW_OWNER = os.environ.get("REVIEW_OWNER", "").strip()
 
 # codex に渡すレビューモデル。
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-6.1-sol")
@@ -53,7 +54,7 @@ GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "").strip()
 # 秘密鍵は PATH (推奨: read-only マウント) か PEM 文字列そのもので渡す。
 GITHUB_APP_PRIVATE_KEY_PATH = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip()
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
-# 省略時は REVIEW_ORG の installation を API で解決する。
+# 省略時は REVIEW_OWNER の installation を API で解決する。
 GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "").strip()
 
 # installation access token (有効期間 1 時間) の残りがこれを下回ったら再発行する (秒)。
