@@ -4,6 +4,8 @@ services:
   webreview:
     build: .
     image: auto-review-web
+    # tini を PID 1 にして、シグナルの転送と子プロセス (codex など) の回収を任せる。
+    init: true
     ports:
       # ホスト側ポートは REVIEW_PORT で変更可 (既定 8080)。
       - "${REVIEW_PORT:-8080}:8080"

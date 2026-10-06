@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import signal
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +207,9 @@ def create_app() -> Flask:
 
 
 def main() -> None:
+    # SIGTERM (docker stop) で正常終了させる。ハンドラが無いと PID 1 では無視され、
+    # init (tini) 経由でもシグナル終了扱いの 143 になる。
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     app = create_app()
     # 単一ワーカーで直列実行するため、開発サーバはスレッド有効・リローダ無効で起動。
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)
