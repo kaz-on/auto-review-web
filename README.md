@@ -6,6 +6,8 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 レビューの対象は GitHub（github.com）のプルリクエストだけ。GitLab などほかのサービスや GitHub Enterprise Server のリポジトリ、PR になっていないブランチやコミットはレビューできない。
 
+このアプリケーションは Claude Code を利用して作成されている。
+
 ## できること
 
 - ブラウザから PR の URL を入力してレビューを実行できる。
