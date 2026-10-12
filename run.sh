@@ -24,5 +24,5 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-# LAN 内の他 PC からアクセスできるよう 0.0.0.0 で待ち受ける (config の既定値)。
+# Web レビューシステムを起動する。
 exec "$VENV_DIR/bin/python" -m webreview
