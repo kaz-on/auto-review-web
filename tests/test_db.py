@@ -79,7 +79,7 @@ def test_古い_db_には後から足した列を補う(tmp_path, monkeypatch):
         db.init()
 
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
-        assert "head_commit" in columns
+        assert {"head_commit", "pr_author", "pr_additions"} <= columns
         # 既存の行は消えず、足した列は NULL で埋まる。
         row = conn.execute("SELECT body, head_commit FROM reviews").fetchone()
         assert (row["body"], row["head_commit"]) == ("既存の本文", None)

@@ -74,6 +74,10 @@ def stub_github(monkeypatch):
             head_sha="headcommit5678",
             title="PR のタイトル",
             body="PR の本文",
+            author="alice",
+            additions=120,
+            deletions=30,
+            changed_files=4,
         ),
     )
 
@@ -124,6 +128,14 @@ def test_pr_のタイトルをキャッシュする(fake_codex, stub_git, stub_g
     review.run_review(PR)
 
     assert reviews.cached_title(PR.repo, PR.number) == "PR のタイトル"
+
+
+def test_pr_の作成者と変更の規模をレビューに記録する(fake_codex, stub_git, stub_github):
+    result = review.run_review(PR)
+
+    got = reviews.get(result.id)
+    assert got.pr_author == "alice"
+    assert (got.pr_additions, got.pr_deletions, got.pr_changed_files) == (120, 30, 4)
 
 
 def test_err_ログは_rev_付きの_gzip_で残る(fake_codex, stub_git, stub_github, temp_paths):

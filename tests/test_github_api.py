@@ -220,6 +220,33 @@ def test_pr_本文が_null_でも空文字にする(capture_requests):
     assert (pull.title, pull.body) == ("", "")
 
 
+def test_pr_の作成者と変更の規模を取得する(capture_requests):
+    _, responses = capture_requests
+    responses[:] = [FakeResponse(json.dumps({
+        "base": {"ref": "main", "sha": "b" * 40}, "head": {"sha": "h" * 40},
+        "title": "t", "body": "", "user": {"login": "alice"},
+        "additions": 120, "deletions": 30, "changed_files": 4,
+    }).encode())]
+
+    pull = github_api.get_pull(FakeProvider("t"), "o", "r", 1)
+
+    assert pull.author == "alice"
+    assert (pull.additions, pull.deletions, pull.changed_files) == (120, 30, 4)
+
+
+def test_作成者や変更の規模が取れなくてもレビューは止めない(capture_requests):
+    _, responses = capture_requests
+    responses[:] = [FakeResponse(json.dumps({
+        "base": {"ref": "main", "sha": "b" * 40}, "head": {"sha": "h" * 40},
+        "title": "t", "body": "", "user": None, "additions": "many",
+    }).encode())]
+
+    pull = github_api.get_pull(FakeProvider("t"), "o", "r", 1)
+
+    assert pull.author == ""
+    assert (pull.additions, pull.deletions, pull.changed_files) == (None, None, None)
+
+
 def test_base_ブランチが取れなければ実行しない(capture_requests):
     _, responses = capture_requests
     responses[:] = [FakeResponse(b'{"base": {}}')]

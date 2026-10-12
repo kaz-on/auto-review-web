@@ -46,6 +46,11 @@ class PullRequest:
     head_sha: str
     title: str
     body: str
+    # 集計用。レビューの実行には使わないので、取れなくても止めない。
+    author: str = ""
+    additions: int | None = None
+    deletions: int | None = None
+    changed_files: int | None = None
 
 
 def api_request(
@@ -118,7 +123,8 @@ def _request_with_token(
 # --- 高レベル API ------------------------------------------------------------
 
 def get_pull(provider: TokenProvider, owner: str, repo: str, number: int) -> PullRequest:
-    """PR の base/head コミット・base ブランチ・タイトル・本文をまとめて取得する。
+    """PR の base/head コミット・base ブランチ・タイトル・本文・作成者・変更の規模を
+    まとめて取得する。
 
     レビュー対象のコミットはここで返す SHA で確定させる。ブランチ名から git で
     引き直すと、PR がマージされたあとに base ブランチの先端が PR 自身を含んでしまう。
@@ -147,7 +153,17 @@ def get_pull(provider: TokenProvider, owner: str, repo: str, number: int) -> Pul
         title=data.get("title") or "",
         # body は null になりうる。
         body=data.get("body") or "",
+        author=(data.get("user") or {}).get("login") or "",
+        # 変更の規模は head_sha 時点のもの (= レビューする差分の規模)。
+        additions=_int_or_none(data.get("additions")),
+        deletions=_int_or_none(data.get("deletions")),
+        changed_files=_int_or_none(data.get("changed_files")),
     )
+
+
+def _int_or_none(value: Any) -> int | None:
+    # bool は int の派生だが、件数としては意味を成さない。
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def create_review(

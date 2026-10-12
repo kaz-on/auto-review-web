@@ -32,6 +32,10 @@ def test_保存した内容がそのまま読み出せる():
         codex_version="1.2.3",
         session_id="0199",
         details="バナー",
+        pr_author="alice",
+        pr_additions=10,
+        pr_deletions=2,
+        pr_changed_files=1,
     )
 
     got = reviews.get(review.id)
@@ -45,6 +49,8 @@ def test_保存した内容がそのまま読み出せる():
     assert got.codex_version == "1.2.3"
     assert got.session_id == "0199"
     assert got.details == "バナー"
+    assert got.pr_author == "alice"
+    assert (got.pr_additions, got.pr_deletions, got.pr_changed_files) == (10, 2, 1)
     assert got.stderr_pruned_at is None
 
 

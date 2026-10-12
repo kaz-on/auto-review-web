@@ -525,6 +525,10 @@ def run_review(
         session_id=run.session_id,
         details=run.details,
         include_quality=include_quality,
+        pr_author=pull.author,
+        pr_additions=pull.additions,
+        pr_deletions=pull.deletions,
+        pr_changed_files=pull.changed_files,
     )
     reviews.set_stderr_path(review.id, _finalize_err_log(tmp_path, pr, review.rev))
 

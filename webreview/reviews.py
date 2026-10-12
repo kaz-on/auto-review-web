@@ -47,6 +47,10 @@ class Review:
     body: str
     details: str | None
     include_quality: bool
+    pr_author: str | None
+    pr_additions: int | None
+    pr_deletions: int | None
+    pr_changed_files: int | None
     stderr_path: str | None
     stderr_pruned_at: float | None
 
@@ -72,6 +76,10 @@ def create(
     session_id: str | None = None,
     details: str | None = None,
     include_quality: bool = False,
+    pr_author: str | None = None,
+    pr_additions: int | None = None,
+    pr_deletions: int | None = None,
+    pr_changed_files: int | None = None,
     stderr_path: str | None = None,
     created_at: float | None = None,
     rev: int | None = None,
@@ -92,12 +100,14 @@ def create(
         cur = conn.execute(
             "INSERT INTO reviews (repo, pr_number, rev, created_at, base_ref, "
             "base_commit, head_commit, model, reasoning_effort, codex_version, "
-            "session_id, body, details, include_quality, stderr_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_id, body, details, include_quality, pr_author, pr_additions, "
+            "pr_deletions, pr_changed_files, stderr_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 repo, pr_number, rev, created_at or time.time(), base_ref,
                 base_commit, head_commit, model, reasoning_effort, codex_version,
-                session_id, body, details, int(include_quality), stderr_path,
+                session_id, body, details, int(include_quality), pr_author or None,
+                pr_additions, pr_deletions, pr_changed_files, stderr_path,
             ),
         )
         review_id = cur.lastrowid

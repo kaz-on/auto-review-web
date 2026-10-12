@@ -23,7 +23,7 @@ _BUSY_TIMEOUT_MS = 10_000
 
 _local = threading.local()
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reviews (
@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS reviews (
     -- バグ以外の品質改善も指摘対象に含めて実行したか。プロンプトが変わるため、
     -- 本文を読み比べるときの前提として残す。
     include_quality  INTEGER NOT NULL DEFAULT 0,
+    -- 集計用の PR の情報。作成者は変わらず、変更の規模は head_commit 時点のもの
+    -- なので、PR ごとのキャッシュ (pr_titles) ではなくレビューに記録する。
+    -- 列を足す前のレビューは NULL (python -m webreview.backfill で埋める)。
+    pr_author        TEXT,
+    pr_additions     INTEGER,
+    pr_deletions     INTEGER,
+    pr_changed_files INTEGER,
     -- err ログの実体。期限削除したら NULL に戻し pruned_at を立てる。
     stderr_path      TEXT,
     stderr_pruned_at REAL,
@@ -108,6 +115,10 @@ _ADDED_COLUMNS = (
     ("reviews", "head_commit", "TEXT"),
     ("reviews", "include_quality", "INTEGER NOT NULL DEFAULT 0"),
     ("jobs", "include_quality", "INTEGER NOT NULL DEFAULT 0"),
+    ("reviews", "pr_author", "TEXT"),
+    ("reviews", "pr_additions", "INTEGER"),
+    ("reviews", "pr_deletions", "INTEGER"),
+    ("reviews", "pr_changed_files", "INTEGER"),
 )
 
 
