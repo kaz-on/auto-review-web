@@ -299,6 +299,7 @@ set -a; source .env; set +a
 
 - 文字コードは BOM 付きの UTF-8 で、Excel でそのまま開ける。pandas なら `pd.read_csv(path, encoding="utf-8-sig")` で読める。
 - 日時（`created_at`）は UTC の ISO 8601（`2026-10-12T03:04:05Z`）。
+- ファイル名には書き出した日時が UTC で付く（`reviews-20261012-030405Z.csv`）。
 - 真偽値（`is_latest_rev` / `include_quality`）は `1` / `0`。値が無いところは空欄。
 
 ### `reviews.csv`（レビュー 1 件 = 1 行）

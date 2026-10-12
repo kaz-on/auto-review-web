@@ -74,8 +74,12 @@ def _summary_filter() -> tuple[str | None, str | None]:
 
 
 def _csv_response(name: str, csv_lines: Iterable[str]) -> Response:
-    """CSV をダウンロードさせる。件数に上限が無いので、組み立てながら送る。"""
-    filename = f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+    """CSV をダウンロードさせる。件数に上限が無いので、組み立てながら送る。
+
+    ファイル名の日時はサーバのタイムゾーン設定に左右されないよう UTC で付け、
+    末尾の Z でそれと分かるようにする (Docker のコンテナは既定で UTC)。
+    """
+    filename = f"{name}-{time.strftime('%Y%m%d-%H%M%SZ', time.gmtime())}.csv"
     return Response(
         csv_lines,
         content_type="text/csv; charset=utf-8",
