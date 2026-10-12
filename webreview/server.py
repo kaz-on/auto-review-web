@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import signal
 import sys
+import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import config, db, github_auth, reviews, store
+from . import config, db, export, github_auth, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -62,6 +64,23 @@ def _int_arg(name: str, default: int) -> int:
         return int(request.args.get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _summary_filter() -> tuple[str | None, str | None]:
+    """集計タブの絞り込み条件 (repo / q)。一覧とエクスポートで共通。"""
+    repo = (request.args.get("repo") or "").strip() or None
+    q = (request.args.get("q") or "").strip() or None
+    return repo, q
+
+
+def _csv_response(name: str, csv_lines: Iterable[str]) -> Response:
+    """CSV をダウンロードさせる。件数に上限が無いので、組み立てながら送る。"""
+    filename = f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        csv_lines,
+        content_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def create_app() -> Flask:
@@ -192,8 +211,7 @@ def create_app() -> Flask:
         """集計一覧。本文は含めず、開かれた時点で個別に取得させる。"""
         limit = _int_arg("limit", reviews.DEFAULT_LIMIT)
         offset = max(0, _int_arg("offset", 0))
-        repo = (request.args.get("repo") or "").strip() or None
-        q = (request.args.get("q") or "").strip() or None
+        repo, q = _summary_filter()
 
         # 未取得・失効ぶんのタイトルは裏で埋める (この応答は待たせない)。
         reviews.refresh_titles_async()
@@ -212,6 +230,23 @@ def create_app() -> Flask:
         if detail is None:
             return jsonify({"error": "レビューが見つかりません。"}), 404
         return jsonify(detail)
+
+    # --- エクスポート ----------------------------------------------------
+    # 集計はアプリの外で行う前提で、レビュー単位と指摘単位の CSV を出す。
+    # 絞り込み条件は集計タブと同じ。
+    @app.get("/api/export/reviews.csv")
+    def api_export_reviews():
+        repo, q = _summary_filter()
+        return _csv_response(
+            "reviews", export.to_csv(export.REVIEW_COLUMNS, export.review_rows(repo, q))
+        )
+
+    @app.get("/api/export/findings.csv")
+    def api_export_findings():
+        repo, q = _summary_filter()
+        return _csv_response(
+            "findings", export.to_csv(export.FINDING_COLUMNS, export.finding_rows(repo, q))
+        )
 
     return app
 

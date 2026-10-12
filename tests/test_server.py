@@ -471,3 +471,29 @@ def test_集計を開いてもタイトル取得を待たない(
     app.test_client().get("/api/summary")
 
     assert calls == [1]
+
+
+# --- エクスポート -----------------------------------------------------------
+def test_レビュー単位の_csv_をダウンロードさせる(client):
+    reviews.create(repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
+
+    resp = client.get("/api/export/reviews.csv")
+
+    assert resp.status_code == 200
+    assert resp.content_type == "text/csv; charset=utf-8"
+    assert resp.headers["Content-Disposition"].startswith('attachment; filename="reviews-')
+    lines = resp.get_data(as_text=True).removeprefix("\ufeff").splitlines()
+    assert lines[0].startswith("review_id,repo,pr_number,")
+    assert len(lines) == 2
+
+
+def test_指摘単位の_csv_も集計タブと同じ条件で絞り込める(client):
+    reviews.create(repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
+    reviews.create(repo="other", pr_number=2, body="- [P2] u — b.py:1\n")
+
+    resp = client.get("/api/export/findings.csv?repo=other")
+
+    assert resp.headers["Content-Disposition"].startswith('attachment; filename="findings-')
+    lines = resp.get_data(as_text=True).removeprefix("\ufeff").splitlines()
+    assert len(lines) == 2
+    assert lines[1].split(",")[1] == "other"
