@@ -156,3 +156,46 @@ def test_余分な区切りを含むパスも解決する():
     _, found = findings.extract("- 指摘 — /work/my-repo/./src//a.py:1\n", REPO)
 
     assert found[0].path == "src/a.py"
+
+
+# --- 集計用の読み取り -------------------------------------------------------
+def test_集計用の読み取りはパスを解決せずに指摘を数える():
+    parsed = findings.parse(SAMPLE)
+
+    assert [(i.raw_path, i.priority) for i in parsed.items] == [
+        ("/work/my-repo/order_service.py", "P1"),
+        ("/work/my-repo/store/orders.py", "P2"),
+    ]
+    assert parsed.unparsed == 0
+
+
+def test_リポジトリの外を指す指摘も集計では数える():
+    """行コメントにできるかどうかは投稿の都合で、指摘であることは変わらない。"""
+    body = "- [P1] 外を指す — /elsewhere/a.py:1\n"
+
+    assert len(findings.parse(body).items) == 1
+    assert findings.extract(body, REPO)[1] == []
+
+
+def test_書式を読めない箇条書きの数を返す():
+    body = (
+        "要約\n\n"
+        "- [P1] 読める — /work/my-repo/a.py:1\n"
+        "- [P2] 位置が無い指摘\n"
+        "- もう一つ\n"
+    )
+
+    parsed = findings.parse(body)
+
+    assert len(parsed.items) == 1
+    # 先頭の導入部分は箇条書きではないので数えない。
+    assert parsed.unparsed == 2
+
+
+def test_読み取った指摘は行コメントの形に直せる():
+    item = findings.parse(SAMPLE).items[1]
+
+    finding = item.resolve(REPO)
+
+    assert (finding.path, finding.start_line, finding.end_line) == ("store/orders.py", 57, 58)
+    assert finding.title == item.title

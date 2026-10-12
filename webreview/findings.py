@@ -11,6 +11,9 @@ codex の出力は自由記述なので、書式が読み取れたものだけ�
 パスは codex が動いた作業ツリーの絶対パスで出るため、リポジトリのルート
 (REVIEW_WORK_PATH/<repo>) からの相対パスに直す。直せないパスは GitHub 側でも
 解決できない (422 になる) ので、行コメントにはせず本文に残す。
+
+集計 (export) は同じ読み取り方 (parse) で指摘を数える。パスの解決は投稿のための
+もので、指摘であるかどうかには関わらない。
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Finding", "extract"]
+__all__ = ["Finding", "Item", "Parsed", "extract", "parse"]
 
 # 箇条書きの先頭行。優先度と行範囲は省略されることがある。
 # タイトルは貪欲に取り、行末の "パス:行" が成立する最後の区切りで切る
@@ -35,6 +38,40 @@ _HEADING_RE = re.compile(
 
 # 箇条書きの開始行。書式が読めなくても、ここで区切って本文に残す。
 _ITEM_RE = re.compile(r"^-\s+\S")
+
+
+@dataclass
+class Item:
+    """書式を読み取れた 1 件の指摘。パスは codex が出したまま (作業ツリーの絶対パス)。"""
+
+    raw_path: str
+    start_line: int
+    end_line: int
+    title: str
+    description: str
+    priority: str | None = None
+
+    def resolve(self, repo_path: Path) -> Finding | None:
+        """行コメントにできる形に直す。パスがリポジトリの外を指せば None。"""
+        path = _relative_path(self.raw_path, repo_path)
+        if path is None:
+            return None
+        return Finding(
+            path=path,
+            start_line=self.start_line,
+            end_line=self.end_line,
+            title=self.title,
+            description=self.description,
+            priority=self.priority,
+        )
+
+
+@dataclass
+class Parsed:
+    items: list[Item]
+    # 箇条書きなのに指摘の書式を読み取れなかった数。codex の出力がぶれて指摘を
+    # 取りこぼしていないかの目安 (要約の箇条書きなど、指摘でないものも数える)。
+    unparsed: int
 
 
 @dataclass
@@ -74,18 +111,31 @@ class Finding:
         return f"**{heading}**\n\n{self.description}"
 
 
+def parse(body: str) -> Parsed:
+    """本文から書式を読み取れた指摘を取り出す。パスは解決しない。"""
+    items: list[Item] = []
+    unparsed = 0
+    for block in _blocks(body.splitlines()):
+        item = _read(block)
+        if item is not None:
+            items.append(item)
+        elif _ITEM_RE.match(block[0]):
+            unparsed += 1
+    return Parsed(items=items, unparsed=unparsed)
+
+
 def extract(body: str, repo_path: Path) -> tuple[str, list[Finding]]:
     """本文を「行コメントにできなかった残り」と「指摘」に分ける。
 
     残りの本文は元の並びのまま返すので、全体の要約や書式の読めなかった箇条書きは
     レビュー本体のコメントとして投稿される。
     """
-    lines = body.splitlines()
     kept: list[str] = []
     findings: list[Finding] = []
 
-    for block in _blocks(lines):
-        finding = _parse(block, repo_path)
+    for block in _blocks(body.splitlines()):
+        item = _read(block)
+        finding = item.resolve(repo_path) if item is not None else None
         if finding is None:
             kept.extend(block)
         else:
@@ -108,14 +158,10 @@ def _blocks(lines: list[str]) -> list[list[str]]:
     return blocks
 
 
-def _parse(block: list[str], repo_path: Path) -> Finding | None:
-    """1 ブロックを指摘として解釈する。行コメントにできなければ None。"""
+def _read(block: list[str]) -> Item | None:
+    """1 ブロックを指摘として解釈する。書式が読めなければ None。"""
     m = _HEADING_RE.match(block[0])
     if not m:
-        return None
-
-    path = _relative_path(m.group("path"), repo_path)
-    if path is None:
         return None
 
     start = int(m.group("start"))
@@ -125,8 +171,8 @@ def _parse(block: list[str], repo_path: Path) -> Finding | None:
     if start > end:
         start, end = end, start
 
-    return Finding(
-        path=path,
+    return Item(
+        raw_path=m.group("path"),
         start_line=start,
         end_line=end,
         title=m.group("title").strip(),
