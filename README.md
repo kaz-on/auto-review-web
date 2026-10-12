@@ -185,6 +185,7 @@ webreview/
   store.py       ジョブ状態の管理
   reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ
   worker.py      単一ワーカーによる直列実行キュー
+  backfill.py    既存のレビューに PR の作成者・変更の規模を埋める管理用スクリプト
   server.py      Flask（REST API + 静的配信）
   static/        フロントエンド（HTML / CSS / JS）
     types.d.ts   API レスポンスの型（型検査専用。配信はしない）
@@ -265,6 +266,28 @@ codex の 2 つの出力は性質が違うため扱いを分けている。
 生ログはアプリからは読み返さない。集計に必要な先頭の実行条件ブロックだけを実行直後に取り出して DB に保存するため、期限削除しても画面表示は変わらない。
 
 レビュー本文の先頭に出る `codex review (モデル, reasoning=..., rev-N):` は、保存された本文には含まれない。モデル名などはカラムとして持ち、表示・投稿のたびに組み立てる。品質改善を含めて実行したレビューには `quality` が入る。
+
+集計用に、PR の作成者と変更の規模（追加行数・削除行数・変更ファイル数）もレビューごとに記録する。どちらもレビューの開始時に取得する PR の情報に含まれているので、API の呼び出しは増えない。規模はレビューした head コミット時点のもの。
+
+### 既存のレビューへの補完
+
+作成者と変更の規模を記録するようになる前のレビューは、これらが空になっている。自動では埋めないので、必要なら管理用のスクリプトを手で実行する。
+
+```bash
+# Docker の場合
+docker compose exec webreview python -m webreview.backfill --dry-run   # 取得して表示するだけ
+docker compose exec webreview python -m webreview.backfill
+
+# ホストで直接起動している場合（.env を読み込んでから実行する）
+set -a; source .env; set +a
+.venv/bin/python -m webreview.backfill
+```
+
+- 作成者は PR の API から取る。GitHub API は PR 1 件につき 1 回呼ぶ。
+- 変更の規模は、PR の現在の head がレビューした head と同じなら PR の API の値を使う。レビューのあとに push されていれば、compare API でレビューした差分（`base_commit...head_commit`）の規模を求め直す（そのレビューごとに API をもう 1 回呼ぶ）。
+- head を記録していない古いレビューや、変更ファイルが 300 以上あって合計を出せないレビューは、規模を空のまま残す。
+- 既に入っている値は上書きしないので、何度実行してもよい。取得に失敗した PR があれば終了コード 1 で終わる。
+- サーバを動かしたままで実行してよい。
 
 ## 品質改善の指摘
 

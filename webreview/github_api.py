@@ -166,6 +166,43 @@ def _int_or_none(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+@dataclass
+class DiffStats:
+    additions: int
+    deletions: int
+    changed_files: int
+
+
+# compare API が返すファイル一覧の上限。これ以上は切り詰められて合計が合わない。
+_COMPARE_FILE_LIMIT = 300
+
+
+def compare_stats(
+    provider: TokenProvider, owner: str, repo: str, base: str, head: str
+) -> DiffStats | None:
+    """base...head (merge-base からの差分) の変更の規模を返す。
+
+    PR の API が返す規模は現在の head 時点のものなので、レビューのあとに push された
+    PR では、レビューした差分の規模をこちらで求め直す。ファイル一覧が上限で
+    切り詰められていると合計が合わないため、そのときは分からないとして None を返す。
+    """
+    data = _request_with_token(
+        provider, "GET", f"/repos/{owner}/{repo}/compare/{base}...{head}"
+    )
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, list) or len(files) >= _COMPARE_FILE_LIMIT:
+        return None
+    additions = deletions = 0
+    for f in files:
+        a = _int_or_none(f.get("additions")) if isinstance(f, dict) else None
+        d = _int_or_none(f.get("deletions")) if isinstance(f, dict) else None
+        if a is None or d is None:
+            return None
+        additions += a
+        deletions += d
+    return DiffStats(additions=additions, deletions=deletions, changed_files=len(files))
+
+
 def create_review(
     provider: TokenProvider,
     owner: str,
