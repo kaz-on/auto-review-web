@@ -575,6 +575,30 @@ summaryQ.addEventListener("input", () => {
 });
 
 /**
+ * 集計タブの絞り込み条件。一覧と CSV ダウンロードで共通。
+ * @returns {URLSearchParams}
+ */
+function summaryFilterParams() {
+  const params = new URLSearchParams();
+  if (summaryRepo.value) params.set("repo", summaryRepo.value);
+  if (summaryQ.value.trim()) params.set("q", summaryQ.value.trim());
+  return params;
+}
+
+// 一覧の読み込み中に条件を変えても食い違わないよう、URL はクリックした時点の
+// 条件で作る (href を書き換えたあと、既定の動作でダウンロードが始まる)。
+for (const [id, path] of [
+  ["export-reviews", "/api/export/reviews.csv"],
+  ["export-findings", "/api/export/findings.csv"],
+]) {
+  const link = /** @type {HTMLAnchorElement} */ (document.getElementById(id));
+  link.addEventListener("click", () => {
+    const query = summaryFilterParams().toString();
+    link.href = query ? `${path}?${query}` : path;
+  });
+}
+
+/**
  * @param {number | null} n
  * @returns {string}
  */
@@ -588,11 +612,9 @@ async function loadSummary() {
   summaryLoading = true;
   summaryStatus.textContent = "読み込み中...";
   try {
-    const params = new URLSearchParams({
-      limit: String(PAGE_SIZE), offset: String(summaryOffset),
-    });
-    if (summaryRepo.value) params.set("repo", summaryRepo.value);
-    if (summaryQ.value.trim()) params.set("q", summaryQ.value.trim());
+    const params = summaryFilterParams();
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", String(summaryOffset));
 
     /** @type {SummaryResponse} */
     const data = await fetchJSON("/api/summary?" + params);

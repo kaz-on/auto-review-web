@@ -63,6 +63,13 @@
       <button id="reload-summary">更新</button>
     </div>
     <p id="summary-status" class="meta"></p>
+    <!-- 集計はアプリの外で行う。リンクの URL はクリック時に今の絞り込み条件から作る -->
+    <p class="meta">
+      CSV ダウンロード（今の絞り込み条件・全件）:
+      <a id="export-reviews" href="/api/export/reviews.csv" download>レビュー単位</a>
+      /
+      <a id="export-findings" href="/api/export/findings.csv" download>指摘単位</a>
+    </p>
     <div id="summary-list" class="summary-list"></div>
     <div class="form-row pager hidden" id="summary-pager">
       <button id="summary-prev" type="button">← 前</button>
