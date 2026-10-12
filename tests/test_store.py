@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
-from webreview import db, reviews, store
+from webreview import config, db, reviews, store
 
 pytestmark = pytest.mark.usefixtures("temp_db")
 
@@ -142,6 +143,20 @@ def test_一覧は新しい順に返る():
     assert [j.id for j in store.list_jobs()] == list(reversed(ids))
 
 
+def test_一覧は新しいほうから件数を絞れる():
+    ids = [_create(number=n).id for n in (1, 2, 3)]
+
+    assert [j.id for j in store.list_jobs(limit=2)] == [ids[2], ids[1]]
+    assert store.count() == 3
+
+
+def test_一覧の件数は上限で切り詰める():
+    _create()
+
+    # 0 や負数でも少なくとも 1 件は返す。
+    assert len(store.list_jobs(limit=0)) == 1
+
+
 def test_一覧の進捗は実行中のジョブにだけ載る():
     running = _create(number=1)
     done = _create(number=2)
@@ -270,6 +285,93 @@ def test_ジョブを消しても進捗だけが残らない():
 
 def test_存在しないジョブの削除は_false():
     assert store.delete("no-such-job") is False
+
+
+# --- 古いジョブの自動削除 ---------------------------------------------------
+_OLD = 1.0  # 1970 年。保持期間をどう取っても期限切れになる終了時刻。
+
+
+def _finished(number: int = 1, status: str = store.SUCCEEDED, **fields) -> store.Job:
+    job = _create(number=number)
+    return store.update(job.id, status=status, finished_at=_OLD, **fields)
+
+
+def test_投稿済みの古いジョブは消す():
+    job = _finished(posted=True)
+
+    assert store.prune(retention_days=30) == 1
+    assert store.get(job.id) is None
+
+
+def test_レビューを持たない古いジョブは消す():
+    # 投稿しようがないので、残しても対応のしようがない。
+    job = _finished(review_id=None)
+
+    assert store.prune(retention_days=30) == 1
+    assert store.get(job.id) is None
+
+
+def test_期限内のジョブは消さない():
+    job = _create()
+    store.update(job.id, status=store.SUCCEEDED, posted=True, finished_at=time.time())
+
+    assert store.prune(retention_days=30) == 0
+
+
+def test_未投稿のレビューは古くても残す():
+    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    job = _finished(review_id=review.id)
+
+    assert store.prune(retention_days=30) == 0
+    assert store.get(job.id) is not None
+
+
+def test_失敗したジョブは古くても残す():
+    job = _finished(status=store.FAILED)
+
+    assert store.prune(retention_days=30) == 0
+    assert store.get(job.id) is not None
+
+
+def test_同じ_pr_をやり直していれば失敗や未投稿も消す():
+    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    failed = _finished(number=1, status=store.FAILED)
+    unposted = _finished(number=1, review_id=review.id)
+    latest = _create(number=1)
+    other_pr = _finished(number=2, status=store.FAILED)
+
+    assert store.prune(retention_days=30) == 2
+    assert store.get(failed.id) is None
+    assert store.get(unposted.id) is None
+    assert store.get(latest.id) is not None
+    assert store.get(other_pr.id) is not None
+
+
+@pytest.mark.parametrize("fields", [
+    {"status": store.RUNNING},
+    {"status": store.SUCCEEDED, "posted": True, "posting": True},
+])
+def test_実行中や投稿中のジョブは古くても消さない(fields):
+    job = _create()
+    store.update(job.id, finished_at=_OLD, **fields)
+
+    assert store.prune(retention_days=30) == 0
+
+
+def test_保持日数が_0_なら消さない(monkeypatch):
+    _finished(posted=True)
+    monkeypatch.setattr(config, "JOB_RETENTION_DAYS", 0)
+
+    assert store.prune() == 0
+
+
+def test_古いジョブを消してもレビュー本体は残る():
+    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    _finished(review_id=review.id, posted=True)
+
+    store.prune(retention_days=30)
+
+    assert reviews.get(review.id) is not None
 
 
 # --- 起動時の後始末 ---------------------------------------------------------

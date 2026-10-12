@@ -79,6 +79,11 @@ DB_PATH = _env_path("REVIEW_DB_PATH", BASE_DIR / "data" / "review.db")
 # 0 を指定すると削除しない。
 STDERR_RETENTION_DAYS = int(os.environ.get("REVIEW_STDERR_RETENTION_DAYS", "30"))
 
+# 終了したジョブを「レビュー実行」タブの一覧から自動で消すまでの日数。レビュー本体は
+# 消さないので、集計タブからは引き続き見られる。失敗したジョブと未投稿のレビューは
+# 対応が要るので、同じ PR をやり直していない限り残す。0 を指定すると削除しない。
+JOB_RETENTION_DAYS = int(os.environ.get("REVIEW_JOB_RETENTION_DAYS", "30"))
+
 
 # --- 外部コマンド ------------------------------------------------------------
 GIT_BIN = os.environ.get("REVIEW_GIT_BIN", "git")

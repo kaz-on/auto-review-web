@@ -76,6 +76,10 @@ def create_app() -> Flask:
     if pruned:
         print(f"[info] 期限切れの codex ログを {pruned} 件削除しました。", flush=True)
 
+    pruned = store.prune()
+    if pruned:
+        print(f"[info] 期限切れのジョブを {pruned} 件履歴から削除しました。", flush=True)
+
     _check_review_owner()
     _check_github_auth()
     worker.start()
@@ -127,15 +131,21 @@ def create_app() -> Flask:
                 "review_id": job.review_id,
             })
         worker.enqueue(job.id)
+        # 常駐していても履歴が溜まらないよう、ジョブが増えるたびに古いものを片付ける。
+        store.prune()
         return jsonify({
             "skipped": False, "job": _job_public(job), "was_busy": was_busy,
         }), 201
 
     @app.get("/api/reviews")
     def list_reviews():
-        jobs = store.list_jobs()
+        limit = max(1, min(_int_arg("limit", store.DEFAULT_LIST_LIMIT),
+                           store.MAX_LIST_LIMIT))
+        jobs = store.list_jobs(limit=limit)
         return jsonify({
             "jobs": [_job_public(j) for j in jobs],
+            "total": store.count(),
+            "limit": limit,
             "busy": store.has_active(),
         })
 

@@ -17,6 +17,7 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 - 指摘は **ソース行へのコメント** として投稿する（位置を読み取れなかったぶんは本文にまとめる）。
 - 自動投稿をOFFにした場合や自動投稿に失敗した場合は、ボタンから手動で投稿できる。
 - 終了したレビューは履歴から削除して一覧を整理できる（ログファイルは残る）。
+- 一覧には直近 20 件を表示し、「さらに表示」で古いものを読み込める。終了から 30 日を過ぎたジョブは履歴から自動で削除する（`REVIEW_JOB_RETENTION_DAYS`）。失敗したジョブと未投稿のレビューは、同じ PR をやり直さない限り残す。どちらの削除でもレビュー本体は消えず、集計タブから見られる。
 - 過去のレビューを一覧・検索できる（リポジトリでの絞り込みと本文検索に対応）。
 - エラーが発生した場合は画面にエラーメッセージを表示する。
 
@@ -139,6 +140,7 @@ python3 -m venv .venv
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |
 | `REVIEW_STDERR_RETENTION_DAYS` | `30` | codex 生ログの保持日数。`0` で削除しない |
+| `REVIEW_JOB_RETENTION_DAYS` | `30` | 終了したジョブを一覧から自動削除するまでの日数。失敗・未投稿のものは残す。`0` で削除しない |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリの作業ディレクトリ |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | codex の生ログのルート |
 | `REVIEW_DB_PATH` | `data/review.db` | SQLite データベースの位置 |
@@ -226,7 +228,7 @@ API レスポンスの型は `static/types.d.ts` にまとめてある。これ�
 | メソッド / パス | 説明 |
 | --- | --- |
 | `POST /api/reviews` | `{"url": "...", "auto_post": true, "include_quality": true, "skip_if_reviewed": false}` でレビューを投入（下記「CI からの投入」） |
-| `GET /api/reviews` | ジョブ一覧と `busy` 状態 |
+| `GET /api/reviews` | ジョブ一覧（新しい順に `limit` 件。既定 20、上限 500）と総数 `total`・`busy` 状態 |
 | `GET /api/reviews/<id>` | ジョブ詳細（レビュー本文を含む） |
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |

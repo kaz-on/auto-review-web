@@ -16,7 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from . import db
+from . import config, db
 
 # ジョブのステータス
 QUEUED = "queued"
@@ -25,6 +25,10 @@ SUCCEEDED = "succeeded"
 FAILED = "failed"
 
 _ACTIVE = (QUEUED, RUNNING)
+
+# 一覧で 1 度に返す件数。画面は 2 秒間隔でポーリングするので、全件は返さない。
+DEFAULT_LIST_LIMIT = 20
+MAX_LIST_LIMIT = 500
 
 # update() で書き換えを許すカラム (列名を SQL に直接埋めるため固定集合で縛る)。
 _UPDATABLE = frozenset({
@@ -144,17 +148,24 @@ def get(job_id: str, with_progress: bool = True) -> Job | None:
     return _row_to_job(row, progress)
 
 
-def list_jobs() -> list[Job]:
-    """新しい順にジョブを返す。
+def list_jobs(limit: int = DEFAULT_LIST_LIMIT) -> list[Job]:
+    """新しい順に最大 limit 件のジョブを返す。
 
     進捗の全文は実行中・待機中のジョブにだけ載せる。終了したジョブの進捗は
     変化しないうえ件数とともに際限なく増えるため、必要になった時点で
     get() から取得する (一覧は 2 秒間隔でポーリングされる)。
     """
-    rows = db.connect().execute(_SELECT + " ORDER BY j.created_at DESC").fetchall()
+    limit = max(1, min(limit, MAX_LIST_LIMIT))
+    rows = db.connect().execute(
+        _SELECT + " ORDER BY j.created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
     active_ids = [r["id"] for r in rows if r["status"] in _ACTIVE]
     progress = _progress_for(active_ids)
     return [_row_to_job(r, progress.get(r["id"])) for r in rows]
+
+
+def count() -> int:
+    return db.connect().execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
 
 def has_active() -> bool:
@@ -268,6 +279,31 @@ def delete(job_id: str) -> bool:
             (job_id, QUEUED, RUNNING),
         )
         return cur.rowcount > 0
+
+
+def prune(retention_days: int | None = None) -> int:
+    """終了から retention_days 日を過ぎたジョブを履歴から削除する。件数を返す。
+
+    delete() と同じくレビュー本体は消さない。ただし対応が要るジョブは残す:
+    失敗したジョブと、投稿できるのにまだ投稿していないレビューがそれにあたる。
+    同じ PR に後からジョブを投入していれば、やり直したものとみなして消す。
+    """
+    days = config.JOB_RETENTION_DAYS if retention_days is None else retention_days
+    if days <= 0:
+        return 0
+
+    cutoff = time.time() - days * 86400
+    with db.write() as conn:
+        cur = conn.execute(
+            "DELETE FROM jobs "
+            "WHERE status IN (?, ?) AND posting = 0 AND finished_at < ? "
+            "AND ((status = ? AND (posted = 1 OR review_id IS NULL)) "
+            "     OR EXISTS (SELECT 1 FROM jobs n WHERE n.owner = jobs.owner "
+            "                AND n.repo = jobs.repo AND n.number = jobs.number "
+            "                AND n.created_at > jobs.created_at))",
+            (SUCCEEDED, FAILED, cutoff, SUCCEEDED),
+        )
+        return cur.rowcount
 
 
 def update(job_id: str, **fields: Any) -> Job | None:

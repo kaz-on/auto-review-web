@@ -191,6 +191,27 @@ def test_json_でない本文でも落ちない(client):
     assert resp.status_code == 400
 
 
+def test_投入のたびに古いジョブを片付ける(client):
+    old = _post_review(client, number=1).get_json()["job"]["id"]
+    store.update(old, status=store.SUCCEEDED, posted=True, finished_at=1.0)
+
+    _post_review(client, number=2)
+
+    assert store.get(old) is None
+
+
+def test_起動時に古いジョブを片付ける(
+    temp_db, temp_paths, review_owner, worker, monkeypatch
+):
+    job = store.create(url="u", owner="example-org", repo="my-repo", number=1)
+    store.update(job.id, status=store.SUCCEEDED, posted=True, finished_at=1.0)
+    monkeypatch.setattr(reviews, "refresh_titles_async", lambda *a, **k: None)
+
+    server.create_app()
+
+    assert store.get(job.id) is None
+
+
 # --- ジョブの参照 -----------------------------------------------------------
 def test_一覧は新しい順で実行中かどうかを添える(client):
     first = _post_review(client, number=1).get_json()["job"]["id"]
@@ -200,6 +221,31 @@ def test_一覧は新しい順で実行中かどうかを添える(client):
 
     assert [j["id"] for j in data["jobs"]] == [second, first]
     assert data["busy"] is True
+
+
+def test_一覧は件数を絞って総数を添える(client):
+    ids = [_post_review(client, number=n).get_json()["job"]["id"] for n in (1, 2, 3)]
+
+    data = client.get("/api/reviews?limit=2").get_json()
+
+    assert [j["id"] for j in data["jobs"]] == [ids[2], ids[1]]
+    assert data["total"] == 3
+    assert data["limit"] == 2
+
+
+def test_一覧の件数は上限で切り詰めて知らせる(client):
+    data = client.get(f"/api/reviews?limit={store.MAX_LIST_LIMIT + 1}").get_json()
+
+    assert data["limit"] == store.MAX_LIST_LIMIT
+
+
+@pytest.mark.parametrize("query", ["limit=abc", "limit=", "limit=0"])
+def test_不正な件数指定でも落ちない(client, query):
+    _post_review(client)
+
+    data = client.get(f"/api/reviews?{query}").get_json()
+
+    assert len(data["jobs"]) == 1
 
 
 def test_全て終わっていれば実行中ではない(client):

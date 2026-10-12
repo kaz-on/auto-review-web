@@ -196,6 +196,18 @@ form.addEventListener("submit", async (e) => {
 // ---- ジョブ一覧 (差分更新) --------------------------------------------------
 const jobList = /** @type {HTMLDivElement} */ (document.getElementById("job-list"));
 const jobEmpty = /** @type {HTMLParagraphElement} */ (document.getElementById("job-empty"));
+const jobMore = /** @type {HTMLDivElement} */ (document.getElementById("job-more"));
+const jobRange = /** @type {HTMLSpanElement} */ (document.getElementById("job-range"));
+const jobMoreBtn = /** @type {HTMLButtonElement} */ (document.getElementById("job-more-btn"));
+
+// 一覧に出す件数。新しいジョブが入るたびに中身がずれないよう、ページ送りではなく
+// 「さらに表示」で下に足していく。
+const JOB_PAGE_SIZE = 20;
+let jobLimit = JOB_PAGE_SIZE;
+jobMoreBtn.addEventListener("click", () => {
+  jobLimit += JOB_PAGE_SIZE;
+  refreshJobs();
+});
 const busyBanner = /** @type {HTMLDivElement} */ (document.getElementById("busy-banner"));
 
 /**
@@ -470,6 +482,12 @@ function renderJobs(data) {
   const jobs = data.jobs || [];
   jobEmpty.classList.toggle("hidden", jobs.length > 0);
 
+  // サーバの上限で切り詰められたら、それ以上は広げられないのでボタンを出さない。
+  const truncated = jobs.length < data.total;
+  jobMore.classList.toggle("hidden", !truncated);
+  jobMoreBtn.classList.toggle("hidden", data.limit < jobLimit);
+  jobRange.textContent = `${data.total} 件中 ${jobs.length} 件を表示`;
+
   // busy バナー
   if (data.busy) {
     busyBanner.classList.remove("hidden");
@@ -500,11 +518,16 @@ function renderJobs(data) {
   }
 }
 
+// ポーリングと「さらに表示」の取得が重なったとき、古い件数で取った応答が後から
+// 届いて一覧を縮めないように、最後に投げた要求の応答だけを描画する。
+let jobsRequestSeq = 0;
+
 async function refreshJobs() {
+  const seq = ++jobsRequestSeq;
   try {
     /** @type {ReviewsResponse} */
-    const data = await fetchJSON("/api/reviews");
-    renderJobs(data);
+    const data = await fetchJSON(`/api/reviews?limit=${jobLimit}`);
+    if (seq === jobsRequestSeq) renderJobs(data);
   } catch (_) { /* ポーリングの一時的失敗は無視 */ }
 }
 

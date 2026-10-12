@@ -45,7 +45,12 @@ interface JobDetail extends Job {
 
 /** GET /api/reviews */
 interface ReviewsResponse {
+  /** 新しい順に最大 limit 件。 */
   jobs: Job[];
+  /** 履歴に残っているジョブの総数。 */
+  total: number;
+  /** 実際に適用した件数の上限 (要求値をサーバの上限で切り詰めたもの)。 */
+  limit: number;
   busy: boolean;
 }
 
