@@ -11,6 +11,7 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 ## できること
 
 - ブラウザから PR の URL を入力してレビューを実行できる。
+- レビューは投入順に 1 件ずつ実行される。実行中に投入したレビューは待機中としてキューに並ぶ。
 - レビューの **待機中 / 実行中 / 完了 / 失敗** の状態と進捗ログをリアルタイムに確認できる。
 - レビュー完了後に **自動的に PR へ投稿** できる（既定でON。フォームのチェックで切替可）。
 - バグだけでなく **書き方・品質の改善** も指摘対象に含められる（既定でON。フォームのチェックで切替可。下記「品質改善の指摘」）。
@@ -56,9 +57,7 @@ GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から�
 
 秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを `/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。ファイルではなく PEM 文字列を直接渡したい場合は `GITHUB_APP_PRIVATE_KEY` を使う（改行は `\n` で書ける）。
 
-installation access token は 1 時間で失効するため、**GitHub にアクセスする直前に取得し、残り有効期間が 5 分を切ったら再発行する**（`GITHUB_TOKEN_REFRESH_MARGIN` で調整可）。起動時やジョブ開始時にまとめて取得する方式は、常駐サーバや「完了から時間が経ってからの手動投稿」で失効するため採っていない。
-
-トークンは実行のたびに subprocess の環境変数として渡され、git には環境変数を読む credential helper 経由で渡る。ホストやイメージに認証設定は残らず、コマンドラインや進捗ログにトークンが現れることもない。
+installation access token は GitHub にアクセスする直前に取得し、失効が近ければ再発行するので、常駐させていても切れない。トークンの受け渡しの仕組みは [docs/design.md](docs/design.md#github-トークンの扱い) を参照。
 
 ## 起動方法A: Docker Compose（推奨）
 
@@ -115,14 +114,6 @@ python3 -m venv .venv
 .venv/bin/python -m webreview
 ```
 
-## 同時実行の扱い
-
-レビューは共有の作業ディレクトリで git を操作するため、**単一ワーカーのキュー方式** を採る。
-
-- レビューは投入順に **1 件ずつ直列** に実行される（計算リソースを使いすぎない）。
-- 実行中に別の URL を投入するとキューに追加され、「実行中」バナーと各ジョブの状態表示でユーザーが状況を認識できる。
-- 作業ディレクトリの git 操作も直列化されるため競合しない。
-
 ## 設定（環境変数で上書き可能）
 
 | 環境変数 | 既定値 | 説明 |
@@ -149,8 +140,6 @@ python3 -m venv .venv
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
 | `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
 
-`codex` には上記に加えて `--sandbox read-only --ask-for-approval never --config model_reasoning_summary=none` を固定で渡す。非対話実行で承認待ちに固まらず、作業ツリーを書き換えず、推論サマリをレビュー本文に混ぜないため。
-
 ## 説明文の書式（`REVIEW_DESCRIPTION`）
 
 `REVIEW_DESCRIPTION` を設定すると、画面上部（オーナー / モデル表示の下）に説明欄が出る。レビューの概要や説明ページへのリンクを載せる用途を想定している。未設定なら欄そのものが表示されない。
@@ -171,59 +160,6 @@ REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実�
 ```
 
 見出し・強調・画像・HTML はサポートしない。設定値は DOM のテキストノードとして描画されるため、HTML タグを書いてもマークアップとしては解釈されずそのまま表示される（説明文経由でスクリプトが混入することはない）。
-
-## 構成
-
-```
-webreview/
-  config.py      設定（環境変数で上書き可能）
-  errors.py      画面に出す想定の共通例外
-  db.py          SQLite の接続管理とスキーマ
-  github_auth.py GitHub のトークン供給（PAT / GitHub App）
-  github_api.py  GitHub REST API の薄いラッパ
-  findings.py    レビュー本文から行コメントにできる指摘を取り出す
-  review.py      レビューの実行と投稿（codex / git の駆動）
-  store.py       ジョブ状態の管理
-  reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ
-  worker.py      単一ワーカーによる直列実行キュー
-  export.py      レビューと指摘の CSV 書き出し
-  server.py      Flask（REST API + 静的配信）
-  static/        フロントエンド（HTML / CSS / JS）
-    types.d.ts   API レスポンスの型（型検査専用。配信はしない）
-tests/                pytest によるテスト
-run.sh                起動スクリプト（ホスト直接起動用）
-Dockerfile            codex / アプリを含むイメージ定義
-docker-compose.yml    起動定義（volume・環境変数）
-secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
-.env.example          環境変数のテンプレート（docker compose / run.sh 共通）
-requirements-dev.txt  テスト用の追加依存
-tsconfig.json         フロントエンドの型検査設定（ビルドはしない）
-```
-
-## テスト
-
-```bash
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/pytest
-```
-
-GitHub API・git・codex はいずれも差し替えるので、ネットワークにも本物の `codex` にも触らない（`codex` は代役のスクリプトを起動して確かめる）。`git` が入っていれば remote の検証も実行され、無ければその 2 件だけ skip する。
-
-設定 (`config`) は import 時に環境変数から読む定数なので、テストでは `monkeypatch.setattr(config, ...)` で差し替える。`data/` は `tests/conftest.py` の `isolate_data_paths` が一時ディレクトリへ逃がすため、テストが実データを触ることはない。
-
-### フロントエンドの型検査
-
-`static/app.js` は素の JavaScript のまま配信する（ビルドは無い）。型は JSDoc のコメントで書き、先頭の `// @ts-check` と `tsconfig.json` で TypeScript に検査だけさせる。実行に Node は要らず、検査したいときだけ使う。
-
-```bash
-npx -p typescript@5 tsc --noEmit
-```
-
-`-p typescript@5` は省略しないこと。npm には TypeScript と無関係の `tsc` というパッケージがあり、TypeScript が入っていない環境で `npx tsc` とだけ打つとそちらが実行されて失敗する。
-
-VS Code はこの設定を自動で読むので、エディタ上では何も入れなくても検査が効く。
-
-API レスポンスの型は `static/types.d.ts` にまとめてある。これはサーバ側（`server.py` / `store.py` / `reviews.py` が返す辞書）を手で写したもので自動では同期しない。**API のフィールドを変えたら types.d.ts も直すこと。**
 
 ## API
 
@@ -257,98 +193,25 @@ curl -fsS -X POST "http://<実行PCのIP>:8080/api/reviews" \
   -d "{\"url\": \"${PR_URL}\", \"skip_if_reviewed\": true}"
 ```
 
-## データの持ち方
-
-状態はすべて SQLite（`REVIEW_DB_PATH`）に入る。ディスク上に残るファイルは git の作業ディレクトリと codex の生ログ（err）だけ。
-
-codex の 2 つの出力は性質が違うため扱いを分けている。
-
-- **stdout（レビュー本文）** は散文なので分量が頭打ちになる。DB に保存し、ファイルには残さない。
-- **stderr（全トランスクリプト）** は実行した各コマンドとその出力を含み、PR の差分規模に比例して伸びる。ファイルに流したまま gzip し、`REVIEW_STDERR_RETENTION_DAYS` で期限削除する。
-
-生ログはアプリからは読み返さない。集計に必要な先頭の実行条件ブロックだけを実行直後に取り出して DB に保存するため、期限削除しても画面表示は変わらない。
-
-レビュー本文の先頭に出る `codex review (モデル, reasoning=..., rev-N):` は、保存された本文には含まれない。モデル名などはカラムとして持ち、表示・投稿のたびに組み立てる。品質改善を含めて実行したレビューには `quality` が入る。
-
-集計用に、PR の作成者と変更の規模（追加行数・削除行数・変更ファイル数）もレビューごとに記録する。どちらもレビューの開始時に取得する PR の情報に含まれているので、API の呼び出しは増えない。規模はレビューした head コミット時点のもの。
-
 ## CSV エクスポート
 
-集計そのものはアプリでは行わず、CSV をダウンロードして別のスクリプトや表計算で集計する。集計タブの「CSV ダウンロード」から、そのときの絞り込み条件（リポジトリ・本文検索）で書き出せる。件数の上限は無く、古い順に並ぶ。
+集計そのものはアプリでは行わず、CSV をダウンロードして別のスクリプトや表計算で集計する。集計タブの「CSV ダウンロード」から、そのときの絞り込み条件（リポジトリ・本文検索）で、レビュー単位の `reviews.csv` と指摘単位の `findings.csv` を書き出せる。
 
-- 文字コードは BOM 付きの UTF-8 で、Excel でそのまま開ける。pandas なら `pd.read_csv(path, encoding="utf-8-sig")` で読める。
-- 日時（`created_at`）は UTC の ISO 8601（`2026-10-12T03:04:05Z`）。
-- ファイル名には書き出した日時が UTC で付く（`reviews-20261012-030405Z.csv`）。
-- 真偽値（`is_latest_rev` / `include_quality`）は `1` / `0`。値が無いところは空欄。
-
-### `reviews.csv`（レビュー 1 件 = 1 行）
-
-| 列 | 内容 |
-| --- | --- |
-| `review_id` / `repo` / `pr_number` / `pr_url` / `pr_title` | レビューと PR。タイトルは集計タブと同じキャッシュから引く（未取得なら空欄） |
-| `pr_author` | PR の作成者（GitHub のログイン名） |
-| `rev` / `is_latest_rev` | 同じ PR の何回目のレビューか / その PR の最新のレビューか |
-| `created_at` | レビューした日時 |
-| `model` / `reasoning_effort` / `include_quality` | 実行時の設定 |
-| `pr_additions` / `pr_deletions` / `pr_changed_files` | レビューした差分の規模 |
-| `findings` | 指摘の件数 |
-| `findings_p0` 〜 `findings_p3` / `findings_other` | 優先度ごとの内訳（優先度が無い・それ以外の表記は `other`） |
-| `unparsed_items` | 指摘の書式を読み取れなかった箇条書きの数（下記） |
-
-### `findings.csv`（指摘 1 件 = 1 行）
-
-`review_id` / `repo` / `pr_number` / `pr_author` / `rev` / `is_latest_rev` / `created_at` / `include_quality` / `priority` / `title` / `path` / `start_line` / `end_line` / `description`。
-
-`path` はリポジトリのルートからの相対パス。`description` は複数行になることがある（CSV の規則どおりに引用符で囲む）。指摘の無いレビューは行を出さないので、0 件のレビューも数えたいときは `reviews.csv` を使う。
-
-### 指摘の数え方
-
-PR への投稿と同じく、`- [P1] タイトル — パス:行` の形の箇条書きを 1 件の指摘として数える（「PR への投稿の形」）。投稿では位置を解決できない指摘を本文に残すが、集計ではそれも指摘として数える。
-
-書式を読み取れなかった箇条書きは `unparsed_items` に出す。要約の中の箇条書きなど指摘でないものも含むが、多いレビューは codex の出力がぶれて指摘を取りこぼしている可能性がある。
-
-### 集計するときの注意
-
-- **同じ PR に複数のレビューがある。** やり直したレビューも 1 行ずつ出すので、PR 単位で数えるなら `is_latest_rev == 1` で絞るなど、どれを使うかを決める。
-- **実行条件で指摘の数の基準が変わる。** 品質改善を含めた実行（`include_quality == 1`）は指摘が大きく増える。モデルや reasoning effort も同様。人や期間で比べるときはこれらで分けて集計する。
-- **指摘の数は変更の規模にも比例する。** 必要なら `pr_additions + pr_deletions` などで割った値も見る。
-- **作成者や規模が空欄のレビューがある。** 記録を始める前のレビューのうち、head コミットを記録していない古いものや、変更ファイルが多すぎて規模を求められなかったものは空欄のまま。規模で割るときは空欄を除く。
-- **PR のタイトルや指摘の文面は信頼できない入力として扱う。** fork からの PR のタイトルや codex の出力がそのまま入る。`=` などで始まる値は Excel が数式として解釈しうるので、見慣れない値のセルは不用意に編集・実行しない。
+列の定義や集計するときの注意は [docs/csv-export.md](docs/csv-export.md) を参照。
 
 ## 品質改善の指摘
 
-codex の既定のレビュー指針は、指摘を実際のバグに絞り、一般的なコード品質の話や非ブロッキングな指摘（体裁・タイポ・ドキュメント）を明示的に除外している。
+codex の既定のレビュー指針は、指摘を実際のバグに絞り、一般的なコード品質の話や非ブロッキングな指摘（体裁・タイポ・ドキュメント）を除外している。
 
-フォームの「バグだけでなく、書き方・品質の改善も指摘する」を ON にすると、その除外だけを打ち消す指示をプロンプトに足す（`review._QUALITY_PROMPT`）。読みやすさ、不要な複雑さ、命名、責務の分離、重複、API 設計、テストの不足などを、動作として正しくても指摘の対象にする。
+フォームの「バグだけでなく、書き方・品質の改善も指摘する」を ON にすると、読みやすさ、不要な複雑さ、命名、責務の分離、重複、API 設計、テストの不足なども、動作として正しくても指摘の対象になる。品質の指摘は既定で `[P3]` になる。
 
-打ち消すのは除外の一点だけで、他の条件（この変更で入ったものに限る・既存コードの厳密さに合わせる・ファイルと行範囲を必ず付ける）は残す。品質の指摘は既定で `[P3]` とし、それだけを理由に「変更が正しくない」と判定させない。
+プロンプトに何を足しているかは [docs/design.md](docs/design.md#品質改善の指摘) を参照。
 
-この設定はジョブとレビューの両方に記録するので、ジョブ履歴を消したあとでも、集計タブのレビューがどちらの条件で実行されたかは分かる。
+## ドキュメント
 
-## レビュー対象のコミット
-
-base と head のコミットは、どちらも PR の API（`GET /repos/{owner}/{repo}/pulls/{n}`）が返す SHA をそのまま使い、ブランチ名から git で引き直さない。ブランチから取ると、PR がマージされたあとに base ブランチの先端が PR 自身を含んでしまい、`git diff <base>...HEAD` の merge-base が head 側に一致して差分が空になる。head も API の SHA に固定することで、PR の情報を取ってから fetch するまでの間に push があってもレビュー対象が一意に決まる。SHA が取れない応答は、取り違えたコミットをレビューするより止める方を選んでエラーにする。
-
-GitHub は ref から到達できる SHA なら fetch させるので、fork からの PR でも、ブランチが消えたあとでも同じ手順で取得できる。これは head だけの話ではない — feature ブランチから feature ブランチへ出した PR は、どちらもマージされて削除されると base のブランチも残らないが、コミットはマージ先から到達できるので SHA で要求すれば取れる。SHA 指定の fetch は既定では ref を作らず、オブジェクトが GC の対象になりうるので、refspec で `refs/review/<PR 番号>/{base,head}` に直接受ける。
-
-必要なコミットは実行時に fetch するため、作業ディレクトリは clone せず `git init` + `git remote add` で空から作る。初回に全ブランチ・全履歴を落とさずに済み、この段階では GitHub のトークンも要らない。途中で失敗したディレクトリは消す（残すと次回は「既にある」と見なされ、origin の無いまま使い続けてしまう）。submodule は checkout のあとの `submodule update --init --recursive` で揃える。
-
-## PR への投稿の形
-
-codex は指摘を「タイトル — パス:行範囲」の箇条書きで出す。投稿時にこれを読み、位置の分かった指摘はソース行へのコメントに、残り（全体の要約や書式を読み取れなかったぶん）はレビュー本体の本文にする。パスは codex が動いた作業ツリーの絶対パスなので、`REVIEW_WORK_PATH/<リポジトリ名>` からの相対パスに直す。
-
-行コメントの位置を GitHub が解決できないと、レビューごと 422（`Path could not be resolved` など）で弾かれる。そのときは指摘を含む本文をまとめて 1 つのコメントとして投稿し直すので、投稿自体が失敗することはない。
-
-レビューは実行時の PR の head コミット（`head_commit`）に紐付けて投稿する。
-
-## 確認を挟まない実行
-
-ブラウザからの操作を待たせないため、レビューの実行中は確認を挟まず最後まで進める。
-
-- ログ世代（rev）が既に存在する場合は、新しい rev を自動採番する。
-- レビューはジョブ投入をもって実行する。
-- PR への投稿は既定では完了後に自動で行う。OFF の場合は「PR に投稿」ボタンで実行する。
-- 作業ツリーが dirty でも、毎回 PR のコミットへ `checkout --force` + `clean` して復帰する。
+- [docs/csv-export.md](docs/csv-export.md) — CSV の列の定義と集計するときの注意
+- [docs/development.md](docs/development.md) — 構成・テスト・型検査
+- [docs/design.md](docs/design.md) — 内部の仕様と設計判断
 
 ## ライセンス
 
