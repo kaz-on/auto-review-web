@@ -247,26 +247,6 @@ def test_作成者や変更の規模が取れなくてもレビューは止め�
     assert (pull.additions, pull.deletions, pull.changed_files) == (None, None, None)
 
 
-def test_compare_で差分の規模を合計する(capture_requests):
-    sent, responses = capture_requests
-    responses[:] = [FakeResponse(json.dumps({"files": [
-        {"additions": 3, "deletions": 1}, {"additions": 2, "deletions": 0},
-    ]}).encode())]
-
-    stats = github_api.compare_stats(FakeProvider("t"), "o", "r", "b0", "h1")
-
-    assert stats == github_api.DiffStats(additions=5, deletions=1, changed_files=2)
-    assert sent[0].full_url.endswith("/repos/o/r/compare/b0...h1")
-
-
-def test_compare_のファイル一覧が切り詰められていたら規模は分からない(capture_requests):
-    _, responses = capture_requests
-    files = [{"additions": 1, "deletions": 0}] * 300
-    responses[:] = [FakeResponse(json.dumps({"files": files}).encode())]
-
-    assert github_api.compare_stats(FakeProvider("t"), "o", "r", "b", "h") is None
-
-
 def test_base_ブランチが取れなければ実行しない(capture_requests):
     _, responses = capture_requests
     responses[:] = [FakeResponse(b'{"base": {}}')]

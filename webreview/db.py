@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     include_quality  INTEGER NOT NULL DEFAULT 0,
     -- 集計用の PR の情報。作成者は変わらず、変更の規模は head_commit 時点のもの
     -- なので、PR ごとのキャッシュ (pr_titles) ではなくレビューに記録する。
-    -- 列を足す前のレビューは NULL (python -m webreview.backfill で埋める)。
+    -- 記録を始める前のレビューで、あとから補完できなかったものは NULL。
     pr_author        TEXT,
     pr_additions     INTEGER,
     pr_deletions     INTEGER,
