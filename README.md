@@ -90,6 +90,13 @@ docker compose up -d --build
   docker compose down -v       # volume ごと削除（履歴・クローンも消える）
   ```
 
+- アップデート: codex はビルド時に入れるため、`up --build` ではキャッシュが使われて更新されない。キャッシュを使わずにビルドし直し、コンテナを作り直す（`--pull` でベースイメージも更新する）。volume は保持される。
+
+  ```bash
+  docker compose build --pull --no-cache
+  docker compose up -d
+  ```
+
 ## 起動方法B: ホストで直接起動
 
 レビューを実行する PC に以下が導入済みであること。
