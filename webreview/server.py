@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 import time
@@ -59,6 +60,20 @@ def _check_github_auth() -> None:
         print(f"[info] GitHub 認証モード: {config.GITHUB_AUTH_MODE}", flush=True)
 
 
+def _check_codex_auth() -> None:
+    """Codex の認証情報の設定漏れを起動時のログで気付けるようにする。
+
+    どちらの変数も codex が直接読むので、アプリは値を使わない。ホストで codex login
+    済みなら未設定でも動くため、警告に留めて起動は続ける。
+    """
+    if not (os.environ.get("CODEX_API_KEY") or os.environ.get("CODEX_ACCESS_TOKEN")):
+        print(
+            "[warn] CODEX_API_KEY / CODEX_ACCESS_TOKEN が未設定です。"
+            "codex login 済みでなければレビューは失敗します。",
+            flush=True,
+        )
+
+
 def _int_arg(name: str, default: int) -> int:
     try:
         return int(request.args.get(name, default))
@@ -105,6 +120,7 @@ def create_app() -> Flask:
 
     _check_review_owner()
     _check_github_auth()
+    _check_codex_auth()
     worker.start()
 
     app = Flask(__name__, static_folder=None)

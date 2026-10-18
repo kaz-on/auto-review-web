@@ -59,19 +59,28 @@ GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から�
 
 installation access token は GitHub にアクセスする直前に取得し、失効が近ければ再発行するので、常駐させていても切れない。トークンの受け渡しの仕組みは [docs/design.md](docs/design.md#github-トークンの扱い) を参照。
 
+## Codex 認証
+
+次のどちらか一方を設定する（両方は設定しない）。
+
+- `CODEX_API_KEY`: OpenAI の API キー。
+- `CODEX_ACCESS_TOKEN`: ChatGPT の Business / Enterprise ワークスペースの管理コンソールで発行する [access token](https://developers.openai.com/codex/enterprise/access-tokens)。
+
+どちらも codex がそのまま読むので、アプリ側の設定はいらない。両方とも未設定だと起動ログに `[warn]` が出る（起動は続く）。
+
 ## 起動方法A: Docker Compose（推奨）
 
 ホストに `git` / `codex` を入れなくても、Docker だけで起動できる。Codex CLI はイメージに含まれ、認証は環境変数で渡す（ホストの認証ディレクトリは共有しない）。
 
 ```bash
 cp .env.example .env
-# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、CODEX_API_KEY、REVIEW_OWNER を設定する
+# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、Codex 認証（CODEX_API_KEY もしくは CODEX_ACCESS_TOKEN）、REVIEW_OWNER を設定する
 docker compose up -d --build
 ```
 
 起動後、ブラウザから `http://localhost:8080/` でアクセスする。LAN 内のほかの PC から使う場合は、`.env` に `REVIEW_HOST=0.0.0.0` を設定して `http://<実行PCのIP>:8080/` でアクセスする（上記「セキュリティ上の注意」）。
 
-- 認証: 上記「GitHub 認証」の設定と `CODEX_API_KEY`（Codex CLI）。いずれも `.env` から環境変数として渡す。
+- 認証: 上記「GitHub 認証」「Codex 認証」の設定。いずれも `.env` から環境変数として渡す。
 - 永続化: git リポジトリ（`review_repos`）と、DB・codex の生ログ（`review_logs`）は named volume。ジョブ履歴・レビュー本文・PR タイトルはすべて DB に入る。
 - 停止 / ログ確認:
 
@@ -89,6 +98,8 @@ docker compose up -d --build
 - `git` / `codex`
 
 認証は Docker の場合と同じ環境変数で渡す（`GITHUB_AUTH_MODE` ほか）。`run.sh` はリポジトリ直下に `.env` があれば読んで export するので、設定は docker compose と同じ 1 ファイルで済む。
+
+Tips: ホストの `codex` で `codex login` 済みなら、`CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` を空のままにしておくとその認証が使われる（起動ログの `[warn]` は無視してよい）。ChatGPT アカウントでログインした場合は、そのプランの利用上限がレビューにも適用される。
 
 ```bash
 cp .env.example .env   # 初回のみ。REVIEW_OWNER などを埋める
