@@ -23,6 +23,14 @@ body {
   line-height: 1.6;
 }
 
+/* ヘッダー・タブ・本文を同じ幅の列に揃えて中央に置く */
+header,
+.tabs,
+.tab-panel {
+  max-width: 900px;
+  margin-inline: auto;
+}
+
 header {
   padding: 1rem 1.25rem 0.5rem;
 }
@@ -61,7 +69,7 @@ header h1 { margin: 0; font-size: 1.3rem; }
 }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
-.tab-panel { display: none; padding: 1.25rem; max-width: 900px; }
+.tab-panel { display: none; padding: 1.25rem; }
 .tab-panel.active { display: block; }
 
 h2 { font-size: 1.05rem; margin-top: 1.5rem; }
