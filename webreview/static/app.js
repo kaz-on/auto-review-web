@@ -256,8 +256,13 @@ function buildCard(job) {
     attrs: { title: "履歴から削除", type: "button" },
   });
   delBtn.addEventListener("click", () => doDelete(job.id));
-  const head = el("div", { class: "job-head" },
-    [badge, title, quality, autopost, el("span", { class: "spacer" }), delBtn]);
+  // タイトルとチップは文字と同じ流れで並べ、チップがあってもタイトルの幅が
+  // 狭くならないようにする。折り返した行はバッジの右から始まる。
+  const head = el("div", { class: "job-head" }, [
+    badge,
+    el("div", { class: "job-head-main" }, [title, quality, autopost]),
+    delBtn,
+  ]);
   const sub = el("div", { class: "job-sub" });
   const current = el("div", { class: "job-sub" });
   const errorBox = el("div", { class: "error-box hidden" });

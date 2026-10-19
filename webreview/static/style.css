@@ -137,8 +137,9 @@ label.checkbox input { cursor: pointer; }
   border-radius: 8px;
   padding: 0.8rem 1rem;
 }
-.job-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.job-head .spacer { flex: 1; }
+.job-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.job-head-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.job-head-main .chip { margin-left: 0.4rem; }
 .chip {
   font-size: 0.72rem;
   padding: 0.08rem 0.45rem;
@@ -152,6 +153,7 @@ label.checkbox input { cursor: pointer; }
   font-size: 1rem;
   line-height: 1.2;
   border-radius: 6px;
+  flex-shrink: 0;
 }
 .job-title { font-weight: 600; }
 .job-title a { color: var(--accent); text-decoration: none; }
