@@ -52,9 +52,8 @@ GH_TOKEN = os.environ.get("GH_TOKEN", "")
 # app モード用。CLIENT_ID は JWT の iss に使う (GitHub のドキュメントは App ID より
 # Client ID を推奨しているが、App ID を入れても動作する)。
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "").strip()
-# 秘密鍵は PATH (推奨: read-only マウント) か PEM 文字列そのもので渡す。
+# 秘密鍵はファイルで渡す (read-only マウントを想定)。
 GITHUB_APP_PRIVATE_KEY_PATH = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip()
-GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
 # 省略時は REVIEW_OWNER の installation を API で解決する。
 GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "").strip()
 

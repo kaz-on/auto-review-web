@@ -166,6 +166,7 @@ def _codex_env() -> dict[str, str]:
         "GH_TOKEN",
         "GITHUB_TOKEN",
         "REVIEW_GH_TOKEN",
+        # 廃止済みだが、古い設定で環境に残っていても codex には渡さない。
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_APP_PRIVATE_KEY_PATH",
     ):

@@ -55,7 +55,7 @@ GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem
 GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決
 ```
 
-秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを `/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。ファイルではなく PEM 文字列を直接渡したい場合は `GITHUB_APP_PRIVATE_KEY` を使う（改行は `\n` で書ける）。
+秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを `/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。
 
 installation access token は GitHub にアクセスする直前に取得し、失効が近ければ再発行するので、常駐させていても切れない。トークンの受け渡しの仕組みは [docs/design.md](docs/design.md#github-トークンの扱い) を参照。
 
@@ -140,7 +140,6 @@ python3 -m venv .venv
 | `GH_TOKEN` | （空） | `pat` モードの Personal Access Token |
 | `GITHUB_APP_CLIENT_ID` | （空） | `app` モードの Client ID（App ID も可） |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
-| `GITHUB_APP_PRIVATE_KEY` | （空） | 秘密鍵を PEM 文字列で渡す場合 |
 | `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決 |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。通常は変更不要（PR や clone の URL は github.com 固定のため、変えても GitHub Enterprise Server には対応しない） |

@@ -155,23 +155,16 @@ def _parse_expires_at(value: Any) -> float:
 
 
 def _load_private_key() -> str:
-    """秘密鍵をパスまたは環境変数から読む。パス指定を優先する。"""
-    if config.GITHUB_APP_PRIVATE_KEY_PATH:
-        try:
-            return Path(config.GITHUB_APP_PRIVATE_KEY_PATH).read_text(encoding="utf-8")
-        except OSError as e:
-            raise ReviewError(
-                f"GitHub App の秘密鍵を読めません "
-                f"({config.GITHUB_APP_PRIVATE_KEY_PATH}): {e}"
-            ) from None
-
-    if config.GITHUB_APP_PRIVATE_KEY:
-        # .env に 1 行で書けるよう、リテラルの \n を改行に戻す。
-        return config.GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n")
-
-    raise ReviewError(
-        "GITHUB_APP_PRIVATE_KEY_PATH または GITHUB_APP_PRIVATE_KEY を設定してください。"
-    )
+    """秘密鍵を GITHUB_APP_PRIVATE_KEY_PATH のファイルから読む。"""
+    if not config.GITHUB_APP_PRIVATE_KEY_PATH:
+        raise ReviewError("GITHUB_APP_PRIVATE_KEY_PATH を設定してください。")
+    try:
+        return Path(config.GITHUB_APP_PRIVATE_KEY_PATH).read_text(encoding="utf-8")
+    except OSError as e:
+        raise ReviewError(
+            f"GitHub App の秘密鍵を読めません "
+            f"({config.GITHUB_APP_PRIVATE_KEY_PATH}): {e}"
+        ) from None
 
 
 def build_provider() -> PatTokenProvider | AppTokenProvider:

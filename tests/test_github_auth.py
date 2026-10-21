@@ -266,11 +266,10 @@ def test_解釈できない_expires_at_は一時間後とみなす(value):
 
 
 # --- 秘密鍵の読み込み -------------------------------------------------------
-def test_秘密鍵はパス指定を優先する(tmp_path, monkeypatch):
+def test_秘密鍵はパス指定のファイルから読む(tmp_path, monkeypatch):
     key_file = tmp_path / "key.pem"
     key_file.write_text("FROM FILE")
     monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY_PATH", str(key_file))
-    monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY", "FROM ENV")
 
     assert github_auth._load_private_key() == "FROM FILE"
 
@@ -284,21 +283,10 @@ def test_秘密鍵を読めなければ分かる形で失敗する(tmp_path, mon
         github_auth._load_private_key()
 
 
-def test_環境変数の秘密鍵はリテラルの改行を戻す(monkeypatch):
-    """.env には 1 行でしか書けない。"""
-    monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY_PATH", "")
-    monkeypatch.setattr(
-        config, "GITHUB_APP_PRIVATE_KEY", "-----BEGIN-----\\nabc\\n-----END-----"
-    )
-
-    assert github_auth._load_private_key() == "-----BEGIN-----\nabc\n-----END-----"
-
-
 def test_秘密鍵が無ければ設定を促す(monkeypatch):
     monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY_PATH", "")
-    monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY", "")
 
-    with pytest.raises(ReviewError, match="GITHUB_APP_PRIVATE_KEY"):
+    with pytest.raises(ReviewError, match="GITHUB_APP_PRIVATE_KEY_PATH"):
         github_auth._load_private_key()
 
 
