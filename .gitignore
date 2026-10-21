@@ -3,6 +3,8 @@
 
 # docker compose の環境変数 (トークンを含む)
 /.env
+/.env.*
+!/.env.example
 
 # GitHub App の秘密鍵
 /secrets/*

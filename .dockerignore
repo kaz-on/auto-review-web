@@ -6,6 +6,7 @@ data
 **/__pycache__
 *.pyc
 .env
+.env.*
 secrets
 README.md
 tests
