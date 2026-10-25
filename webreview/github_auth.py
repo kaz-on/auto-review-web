@@ -12,6 +12,10 @@ installation access token は 1 時間で失効するので「使う直前に取
 取得する方式だと、常駐サーバや「レビュー完了から時間が経ってからの手動投稿」で
 失効するため採用しない。
 
+installation はアカウント (オーナー) ごとに分かれるので、``app`` では
+オーナーごとに provider を持つ。``pat`` は 1 つのトークンですべてのオーナーに
+アクセスする。
+
 ワーカースレッド (レビュー実行) と投稿スレッドから同時に呼ばれるため、発行は
 ロックで保護する。
 """
@@ -58,10 +62,12 @@ class AppTokenProvider:
         private_key: str,
         installation_id: str = "",
         refresh_margin: int = 300,
+        owner: str = "",
     ):
         self._client_id = client_id
         self._private_key = private_key
         self._installation_id = installation_id
+        self._owner = owner
         self._refresh_margin = refresh_margin
         self._lock = threading.Lock()
         self._token: str | None = None
@@ -96,7 +102,7 @@ class AppTokenProvider:
         return data["token"], _parse_expires_at(data.get("expires_at"))
 
     def _resolve_installation_id(self, jwt_token: str) -> str:
-        """未指定なら REVIEW_OWNER の installation を引いて以後キャッシュする。
+        """未指定ならオーナーの installation を引いて以後キャッシュする。
 
         installation を引くエンドポイントはアカウントの種類ごとに分かれている。
         Organization として引いて見つからなければ (404)、個人アカウントとして引き直す。
@@ -104,7 +110,7 @@ class AppTokenProvider:
         if self._installation_id:
             return self._installation_id
 
-        owner = config.REVIEW_OWNER
+        owner = self._owner
         for path in (f"/orgs/{owner}/installation", f"/users/{owner}/installation"):
             try:
                 data = github_api.api_request(
@@ -167,7 +173,8 @@ def _load_private_key() -> str:
         ) from None
 
 
-def build_provider() -> PatTokenProvider | AppTokenProvider:
+def build_provider(owner: str) -> PatTokenProvider | AppTokenProvider:
+    """owner のリポジトリにアクセスするための provider を組む。"""
     mode = config.GITHUB_AUTH_MODE
     if mode == "pat":
         if not config.GH_TOKEN:
@@ -177,11 +184,17 @@ def build_provider() -> PatTokenProvider | AppTokenProvider:
     if mode == "app":
         if not config.GITHUB_APP_CLIENT_ID:
             raise ReviewError("GITHUB_APP_CLIENT_ID が設定されていません。")
+        # installation はオーナーごとに違うので、1 つの ID を全員には使い回せない。
+        if config.GITHUB_APP_INSTALLATION_ID and len(config.REVIEW_OWNERS) > 1:
+            raise ReviewError(
+                "GITHUB_APP_INSTALLATION_ID は REVIEW_OWNER が 1 つのときだけ指定できます。"
+            )
         return AppTokenProvider(
             client_id=config.GITHUB_APP_CLIENT_ID,
             private_key=_load_private_key(),
             installation_id=config.GITHUB_APP_INSTALLATION_ID,
             refresh_margin=config.GITHUB_TOKEN_REFRESH_MARGIN,
+            owner=owner,
         )
 
     raise ReviewError(
@@ -189,14 +202,17 @@ def build_provider() -> PatTokenProvider | AppTokenProvider:
     )
 
 
-_PROVIDER: PatTokenProvider | AppTokenProvider | None = None
+_PROVIDERS: dict[str, PatTokenProvider | AppTokenProvider] = {}
 _PROVIDER_LOCK = threading.Lock()
 
 
-def get_provider() -> PatTokenProvider | AppTokenProvider:
-    """プロセス全体で 1 つの TokenProvider を返す (初回のみ構築)。"""
-    global _PROVIDER
+def get_provider(owner: str) -> PatTokenProvider | AppTokenProvider:
+    """owner 用の TokenProvider を返す (オーナーごとに初回のみ構築)。
+
+    発行したトークンは provider が持つので、同じオーナーには同じものを返す。
+    """
     with _PROVIDER_LOCK:
-        if _PROVIDER is None:
-            _PROVIDER = build_provider()
-        return _PROVIDER
+        provider = _PROVIDERS.get(owner)
+        if provider is None:
+            provider = _PROVIDERS[owner] = build_provider(owner)
+        return provider

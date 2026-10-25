@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import config, db, export, github_auth, reviews, store
+from . import config, db, export, forge, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -37,27 +37,36 @@ def _job_public(job: store.Job) -> dict[str, Any]:
 def _check_review_owner() -> None:
     """REVIEW_OWNER の設定漏れを起動時のログで気付けるようにする。
 
-    _check_github_auth と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
+    _check_forge と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
     に parse_pr_url が画面へエラーを出す。
     """
-    if config.REVIEW_OWNER:
-        print(f"[info] レビュー対象のオーナー: {config.REVIEW_OWNER}", flush=True)
+    if config.REVIEW_OWNERS:
+        print(
+            f"[info] レビュー対象のオーナー: {', '.join(config.REVIEW_OWNERS)}",
+            flush=True,
+        )
     else:
         print("[warn] REVIEW_OWNER が未設定です。レビューは実行できません。", flush=True)
 
 
-def _check_github_auth() -> None:
-    """認証設定の不備を起動時のログで気付けるようにする。
+def _check_forge() -> None:
+    """PR のホストと認証の設定の不備を起動時のログで気付けるようにする。
 
     ここでは設定の読み込みだけを行い、ネットワークアクセスはしない。不備があっても
     起動自体は続け、ジョブ実行時に画面へエラーを出す (UI には到達できた方が良い)。
     """
     try:
-        github_auth.get_provider()
+        host = forge.get()
     except ReviewError as e:
-        print(f"[warn] GitHub 認証の設定に問題があります: {e}", flush=True)
+        print(f"[warn] PR のホストの設定に問題があります: {e}", flush=True)
+        return
+    print(f"[info] PR のホスト: {host.name} ({host.pr_url_pattern()})", flush=True)
+    try:
+        summary = host.auth_summary()
+    except ReviewError as e:
+        print(f"[warn] {host.name} の認証の設定に問題があります: {e}", flush=True)
     else:
-        print(f"[info] GitHub 認証モード: {config.GITHUB_AUTH_MODE}", flush=True)
+        print(f"[info] {summary}", flush=True)
 
 
 def _check_codex_auth() -> None:
@@ -119,7 +128,7 @@ def create_app() -> Flask:
         print(f"[info] 期限切れのジョブを {pruned} 件履歴から削除しました。", flush=True)
 
     _check_review_owner()
-    _check_github_auth()
+    _check_forge()
     _check_codex_auth()
     worker.start()
 
@@ -137,8 +146,14 @@ def create_app() -> Flask:
     # --- 設定 ------------------------------------------------------------
     @app.get("/api/config")
     def api_config():
+        try:
+            pr_url_pattern = forge.get().pr_url_pattern()
+        except ReviewError:
+            # 設定の不備は起動ログとレビューの投入時に知らせる。画面は開けるようにする。
+            pr_url_pattern = ""
         return jsonify({
-            "owner": config.REVIEW_OWNER,
+            "owners": list(config.REVIEW_OWNERS),
+            "pr_url_pattern": pr_url_pattern,
             "model": config.REVIEW_MODEL,
             "reasoning_effort": config.REVIEW_REASONING_EFFORT,
             "description": config.REVIEW_DESCRIPTION,

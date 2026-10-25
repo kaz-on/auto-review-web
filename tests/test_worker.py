@@ -36,7 +36,7 @@ def _stub_run_review(monkeypatch, body: str = "## 指摘", seen: dict | None = N
         if progress:
             progress("レビュー中...")
         return reviews.create(
-            repo=pr.repo, pr_number=pr.number, body=body,
+            owner=pr.owner, repo=pr.repo, pr_number=pr.number, body=body,
             include_quality=include_quality,
         )
 

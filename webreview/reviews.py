@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import config, db, github_api, github_auth
+from . import config, db, forge
 from .errors import ReviewError
 
 # PR タイトルの再取得間隔。PR 名は変更されうるので恒久キャッシュにはしない。
@@ -33,6 +33,7 @@ MAX_LIMIT = 200
 @dataclass
 class Review:
     id: int
+    owner: str
     repo: str
     pr_number: int
     rev: int
@@ -64,6 +65,7 @@ def _row_to_review(row: Any) -> Review:
 # --- 書き込み ---------------------------------------------------------------
 def create(
     *,
+    owner: str,
     repo: str,
     pr_number: int,
     body: str,
@@ -93,18 +95,18 @@ def create(
         if rev is None:
             row = conn.execute(
                 "SELECT COALESCE(MAX(rev), -1) + 1 FROM reviews "
-                "WHERE repo = ? AND pr_number = ?",
-                (repo, pr_number),
+                "WHERE owner = ? AND repo = ? AND pr_number = ?",
+                (owner, repo, pr_number),
             ).fetchone()
             rev = row[0]
         cur = conn.execute(
-            "INSERT INTO reviews (repo, pr_number, rev, created_at, base_ref, "
+            "INSERT INTO reviews (owner, repo, pr_number, rev, created_at, base_ref, "
             "base_commit, head_commit, model, reasoning_effort, codex_version, "
             "session_id, body, details, include_quality, pr_author, pr_additions, "
             "pr_deletions, pr_changed_files, stderr_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                repo, pr_number, rev, created_at or time.time(), base_ref,
+                owner, repo, pr_number, rev, created_at or time.time(), base_ref,
                 base_commit, head_commit, model, reasoning_effort, codex_version,
                 session_id, body, details, int(include_quality), pr_author or None,
                 pr_additions, pr_deletions, pr_changed_files, stderr_path,
@@ -137,16 +139,30 @@ def get(review_id: int) -> Review | None:
     return _row_to_review(row) if row else None
 
 
+def repo_key(owner: str, repo: str) -> str:
+    """絞り込みに使うリポジトリの表記 (owner/repo)。"""
+    return f"{owner}/{repo}"
+
+
 def _filter(repo: str | None, q: str | None, alias: str = "") -> tuple[str, list[Any]]:
     """絞り込み条件を WHERE 句とパラメータに組み立てる。
 
+    repo は "owner/repo" の形 (repos() が返すもの)。リポジトリ名だけを渡された
+    ときは、オーナーを問わずその名前のリポジトリに絞る (オーナーを 1 つに固定して
+    いた頃の指定を、そのまま使えるようにするため)。オーナーには "/" が入りうる
+    (GitLab のサブグループ) ので、最後の "/" で区切る。
     alias は join を伴うクエリで列を修飾するための接頭辞 ("r." など)。
     """
     clauses: list[str] = []
     params: list[Any] = []
     if repo:
-        clauses.append(f"{alias}repo = ?")
-        params.append(repo)
+        owner, sep, name = repo.rpartition("/")
+        if sep:
+            clauses.append(f"{alias}owner = ? AND {alias}repo = ?")
+            params.extend([owner, name])
+        else:
+            clauses.append(f"{alias}repo = ?")
+            params.append(name)
     if q:
         clauses.append(f"{alias}body LIKE ?")
         params.append(f"%{q}%")
@@ -174,13 +190,14 @@ def list_summary(
     limit = max(1, min(limit, MAX_LIMIT))
     where, params = _filter(repo, q, alias="r.")
     rows = db.connect().execute(
-        "SELECT r.id, r.repo, r.pr_number, r.rev, r.created_at, r.model, "
+        "SELECT r.id, r.owner, r.repo, r.pr_number, r.rev, r.created_at, r.model, "
         # LENGTH() は TEXT に対して文字数を返すので、BLOB に落としてバイト数を取る。
         "r.reasoning_effort, r.include_quality, "
         "LENGTH(CAST(r.body AS BLOB)) AS body_bytes, "
         "(r.details IS NOT NULL) AS has_details, t.title AS title "
         "FROM reviews r "
-        "LEFT JOIN pr_titles t ON t.repo = r.repo AND t.pr_number = r.pr_number"
+        "LEFT JOIN pr_titles t ON t.owner = r.owner AND t.repo = r.repo "
+        "AND t.pr_number = r.pr_number"
         + where
         + " ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
         [*params, limit, offset],
@@ -189,12 +206,12 @@ def list_summary(
     return [
         {
             "id": row["id"],
+            "owner": row["owner"],
             "repo": row["repo"],
             "pr_num": row["pr_number"],
             "rev": row["rev"],
             "created_at": row["created_at"],
-            "url": f"https://github.com/{config.REVIEW_OWNER}/{row['repo']}"
-                   f"/pull/{row['pr_number']}",
+            "url": forge.get().pr_url(row["owner"], row["repo"], row["pr_number"]),
             "title": row["title"] or "",
             "model": row["model"],
             "reasoning_effort": row["reasoning_effort"],
@@ -219,11 +236,11 @@ def get_detail(review_id: int) -> dict[str, Any] | None:
 
 
 def repos() -> list[str]:
-    """絞り込み用に、レビューが存在するリポジトリ名を返す。"""
+    """絞り込み用に、レビューが存在するリポジトリを owner/repo の形で返す。"""
     return [
-        row[0]
+        repo_key(row["owner"], row["repo"])
         for row in db.connect().execute(
-            "SELECT DISTINCT repo FROM reviews ORDER BY repo"
+            "SELECT DISTINCT owner, repo FROM reviews ORDER BY owner, repo"
         )
     ]
 
@@ -255,10 +272,11 @@ def render_body(review: Review) -> str:
 
 
 # --- PR タイトルのキャッシュ ------------------------------------------------
-def cached_title(repo: str, pr_number: int) -> str | None:
+def cached_title(owner: str, repo: str, pr_number: int) -> str | None:
     row = db.connect().execute(
-        "SELECT title, fetched_at FROM pr_titles WHERE repo = ? AND pr_number = ?",
-        (repo, pr_number),
+        "SELECT title, fetched_at FROM pr_titles "
+        "WHERE owner = ? AND repo = ? AND pr_number = ?",
+        (owner, repo, pr_number),
     ).fetchone()
     if row is None:
         return None
@@ -267,23 +285,23 @@ def cached_title(repo: str, pr_number: int) -> str | None:
     return row["title"]
 
 
-def put_title(repo: str, pr_number: int, title: str) -> None:
+def put_title(owner: str, repo: str, pr_number: int, title: str) -> None:
     if not title:
         return
     with db.write() as conn:
         conn.execute(
-            "INSERT INTO pr_titles (repo, pr_number, title, fetched_at) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT (repo, pr_number) DO UPDATE SET "
+            "INSERT INTO pr_titles (owner, repo, pr_number, title, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (owner, repo, pr_number) DO UPDATE SET "
             "title = excluded.title, fetched_at = excluded.fetched_at",
-            (repo, pr_number, title, time.time()),
+            (owner, repo, pr_number, title, time.time()),
         )
 
 
 def refresh_titles_async(limit: int = 20) -> None:
     """タイトルの取り直しをバックグラウンドで走らせる。
 
-    GitHub API は 1 件ずつ順に叩くため、集計リクエストの中で待つと表示が数秒
+    API は 1 件ずつ順に叩くため、集計リクエストの中で待つと表示が数秒
     止まりうる。取得できなかったぶんは前回の値のまま表示し、次に開いたときに
     反映されればよい。多重起動は避ける (集計は連続で開かれることがある)。
     """
@@ -305,15 +323,16 @@ def refresh_titles_async(limit: int = 20) -> None:
 
 
 def refresh_titles(limit: int = 20) -> int:
-    """タイトル未取得・失効ぶんを GitHub から取り直す。取得できた件数を返す。
+    """タイトル未取得・失効ぶんを PR のホストから取り直す。取得できた件数を返す。
 
     1 回あたりの取得数に上限を設ける。認証未設定や削除された PR で失敗しても
     集計自体は成立させる。
     """
     cutoff = time.time() - TITLE_TTL_SECONDS
     rows = db.connect().execute(
-        "SELECT DISTINCT r.repo, r.pr_number FROM reviews r "
-        "LEFT JOIN pr_titles t ON t.repo = r.repo AND t.pr_number = r.pr_number "
+        "SELECT DISTINCT r.owner, r.repo, r.pr_number FROM reviews r "
+        "LEFT JOIN pr_titles t ON t.owner = r.owner AND t.repo = r.repo "
+        "AND t.pr_number = r.pr_number "
         "WHERE t.title IS NULL OR t.fetched_at < ? "
         "ORDER BY r.created_at DESC LIMIT ?",
         (cutoff, limit),
@@ -322,15 +341,10 @@ def refresh_titles(limit: int = 20) -> int:
     fetched = 0
     for row in rows:
         try:
-            pull = github_api.get_pull(
-                github_auth.get_provider(),
-                config.REVIEW_OWNER,
-                row["repo"],
-                row["pr_number"],
-            )
+            pull = forge.get().get_pull(row["owner"], row["repo"], row["pr_number"])
         except ReviewError:
             continue
-        put_title(row["repo"], row["pr_number"], pull.title)
+        put_title(row["owner"], row["repo"], row["pr_number"], pull.title)
         fetched += 1
     return fetched
 

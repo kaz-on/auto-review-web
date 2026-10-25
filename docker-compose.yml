@@ -11,13 +11,24 @@ services:
       # (既定 127.0.0.1:8080)。LAN 内のほかの PC から使うなら REVIEW_HOST=0.0.0.0。
       - "${REVIEW_HOST:-127.0.0.1}:${REVIEW_PORT:-8080}:8080"
     environment:
-      # 認証 (ホストの認証ディレクトリは共有しない)
-      # GITHUB_AUTH_MODE=pat なら GH_TOKEN、app なら GITHUB_APP_* を使う。
+      # PR をホストするサービス (github / gitlab)。空なら github。
+      # 認証はどちらも環境変数で渡す (ホストの認証ディレクトリは共有しない)。
+      REVIEW_FORGE: ${REVIEW_FORGE:-}
+      # GitHub (REVIEW_FORGE=github)。GITHUB_AUTH_MODE=pat なら GH_TOKEN、app なら GITHUB_APP_* を使う。
       GITHUB_AUTH_MODE: ${GITHUB_AUTH_MODE:-pat}
       GH_TOKEN: ${GH_TOKEN:-}
       GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
       GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
       GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      # GitHub 互換のサービス向け (github.com なら空のままで既定値が使われる)
+      GITHUB_WEB_URL: ${GITHUB_WEB_URL:-}
+      GITHUB_API_URL: ${GITHUB_API_URL:-}
+      GITHUB_CLONE_URL: ${GITHUB_CLONE_URL:-}
+      GITHUB_GIT_USERNAME: ${GITHUB_GIT_USERNAME:-}
+      GITHUB_POST_MODE: ${GITHUB_POST_MODE:-}
+      # GitLab (REVIEW_FORGE=gitlab)
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       # Codex は CODEX_API_KEY か CODEX_ACCESS_TOKEN のどちらか一方。両方空なら起動時に警告する。
       CODEX_API_KEY: ${CODEX_API_KEY:-}
       CODEX_ACCESS_TOKEN: ${CODEX_ACCESS_TOKEN:-}

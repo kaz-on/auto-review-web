@@ -16,10 +16,10 @@ from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config, db, findings, reviews
+from . import config, db, findings, forge, reviews
 
 REVIEW_COLUMNS = [
-    "review_id", "repo", "pr_number", "pr_url", "pr_title", "pr_author",
+    "review_id", "owner", "repo", "pr_number", "pr_url", "pr_title", "pr_author",
     "rev", "is_latest_rev", "created_at", "model", "reasoning_effort",
     "include_quality", "pr_additions", "pr_deletions", "pr_changed_files",
     "findings", "findings_p0", "findings_p1", "findings_p2", "findings_p3",
@@ -27,7 +27,7 @@ REVIEW_COLUMNS = [
 ]
 
 FINDING_COLUMNS = [
-    "review_id", "repo", "pr_number", "pr_author", "rev", "is_latest_rev",
+    "review_id", "owner", "repo", "pr_number", "pr_author", "rev", "is_latest_rev",
     "created_at", "include_quality", "priority", "title", "path",
     "start_line", "end_line", "description",
 ]
@@ -51,9 +51,11 @@ def _rows(repo: str | None, q: str | None) -> Iterator[Any]:
         "SELECT r.*, t.title AS title, "
         # 同じ PR をやり直したレビューのうち、最新のものか。PR 単位の集計で使う。
         "(r.rev = (SELECT MAX(x.rev) FROM reviews x "
-        "WHERE x.repo = r.repo AND x.pr_number = r.pr_number)) AS is_latest_rev "
+        "WHERE x.owner = r.owner AND x.repo = r.repo "
+        "AND x.pr_number = r.pr_number)) AS is_latest_rev "
         "FROM reviews r "
-        "LEFT JOIN pr_titles t ON t.repo = r.repo AND t.pr_number = r.pr_number"
+        "LEFT JOIN pr_titles t ON t.owner = r.owner AND t.repo = r.repo "
+        "AND t.pr_number = r.pr_number"
         + where
         + " ORDER BY r.created_at, r.id",
         params,
@@ -73,8 +75,8 @@ def review_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[
             else:
                 other += 1
         yield [
-            row["id"], row["repo"], row["pr_number"],
-            f"https://github.com/{config.REVIEW_OWNER}/{row['repo']}/pull/{row['pr_number']}",
+            row["id"], row["owner"], row["repo"], row["pr_number"],
+            forge.get().pr_url(row["owner"], row["repo"], row["pr_number"]),
             row["title"], row["pr_author"], row["rev"], row["is_latest_rev"],
             _iso(row["created_at"]), row["model"], row["reasoning_effort"],
             row["include_quality"], row["pr_additions"], row["pr_deletions"],
@@ -86,13 +88,16 @@ def review_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[
 def finding_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[Any]]:
     """指摘 1 件を 1 行にする。指摘の無いレビューは行を出さない。"""
     for row in _rows(repo, q):
-        repo_path = config.WORK_PATH / row["repo"]
+        roots = (
+            config.repo_work_path(row["owner"], row["repo"]),
+            config.legacy_repo_work_path(row["repo"]),
+        )
         for item in findings.parse(row["body"]).items:
             # 投稿と同じくリポジトリからの相対パスにする。直せないものは codex が
             # 出したまま残す (指摘であることには変わりない)。
-            resolved = item.resolve(repo_path)
+            resolved = item.resolve(roots)
             yield [
-                row["id"], row["repo"], row["pr_number"], row["pr_author"],
+                row["id"], row["owner"], row["repo"], row["pr_number"], row["pr_author"],
                 row["rev"], row["is_latest_rev"], _iso(row["created_at"]),
                 row["include_quality"], item.priority, item.title,
                 resolved.path if resolved else item.raw_path,

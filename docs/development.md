@@ -9,9 +9,14 @@ webreview/
   config.py      設定（環境変数で上書き可能）
   errors.py      画面に出す想定の共通例外
   db.py          SQLite の接続管理とスキーマ
+  forge.py       PR をホストするサービス（forge）ごとの違いを受け持つ層の定義
+  github_forge.py GitHub（互換のサービスを含む）の forge 実装（URL の形・git の認証・投稿の手順）
   github_auth.py GitHub のトークン供給（PAT / GitHub App）
   github_api.py  GitHub REST API の薄いラッパ
+  gitlab_forge.py GitLab の forge 実装
+  gitlab_api.py  GitLab REST API の薄いラッパ
   findings.py    レビュー本文から行コメントにできる指摘を取り出す
+  links.py       投稿する本文のファイルの参照を blob へのリンクにする
   review.py      レビューの実行と投稿（codex / git の駆動）
   store.py       ジョブ状態の管理
   reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ

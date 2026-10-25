@@ -197,7 +197,7 @@ def test_モデル表記に推論の深さを併記する(monkeypatch):
 
 # --- 環境変数 ----------------------------------------------------------------
 def test_codex_には_github_の認証情報を渡さない(monkeypatch):
-    for name in ("GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GH_TOKEN",
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GIT_TOKEN",
                  "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_PATH"):
         monkeypatch.setenv(name, "secret")
     monkeypatch.setenv("PATH", os.environ["PATH"])
@@ -205,7 +205,7 @@ def test_codex_には_github_の認証情報を渡さない(monkeypatch):
     env = review._codex_env()
 
     assert not any(name in env for name in (
-        "GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GH_TOKEN",
+        "GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GIT_TOKEN",
         "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_PATH",
     ))
     assert "PATH" in env
@@ -216,15 +216,21 @@ def test_git_にはトークンを環境変数の_credential_helper_で渡す(mo
         def token(self) -> str:
             return "gh-token"
 
-    monkeypatch.setattr(github_auth, "get_provider", lambda: Provider())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: Provider())
 
-    env = review._git_env()
+    env = review._git_env(ParsedPR(owner="example-org", repo="my-repo", number=1))
 
-    assert env["REVIEW_GH_TOKEN"] == "gh-token"
-    # 既存の helper を空値で打ち消してから自前を差し込む。
-    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["REVIEW_GIT_USERNAME"] == "x-access-token"
+    assert env["REVIEW_GIT_TOKEN"] == "gh-token"
+    # 既存の helper を空値で打ち消してから自前を差し込む。helper は PR のホストに限る。
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.https://github.com.helper"
     assert env["GIT_CONFIG_VALUE_0"] == ""
-    assert "REVIEW_GH_TOKEN" in env["GIT_CONFIG_VALUE_1"]
+    assert env["GIT_CONFIG_KEY_1"] == "credential.https://github.com.helper"
+    assert "REVIEW_GIT_USERNAME" in env["GIT_CONFIG_VALUE_1"]
+    assert "REVIEW_GIT_TOKEN" in env["GIT_CONFIG_VALUE_1"]
+    # SHA 指定の fetch がプロトコル v0 では拒否されるサーバがあるので v2 に固定する。
+    assert (env["GIT_CONFIG_KEY_2"], env["GIT_CONFIG_VALUE_2"]) == ("protocol.version", "2")
     assert env["GIT_TERMINAL_PROMPT"] == "0"
 
 
@@ -378,11 +384,29 @@ def test_作業ディレクトリが無ければ_init_して_origin_を付ける
 
     repo_path = review._prepare_repo(pr, lambda _msg: None)
 
-    assert repo_path == work / "my-repo"
+    # 名前が同じリポジトリでもオーナーが違えば混ざらないよう、オーナーの下に作る。
+    assert repo_path == work / "example-org" / "my-repo"
     assert (repo_path / ".git").is_dir()
     assert _git(repo_path, "remote", "get-url", "origin") == (
         "https://github.com/example-org/my-repo.git"
     )
+
+
+@需要git
+def test_互換のサービスでは設定の形の_origin_で作り次回も同じものとみなす(
+    temp_paths, monkeypatch
+):
+    monkeypatch.setattr(config, "GITHUB_WEB_URL", "http://git.example.local:8888")
+    monkeypatch.setattr(config, "GITHUB_CLONE_URL", "{web}/git/{owner}/{repo}.git")
+    pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
+
+    repo_path = review._prepare_repo(pr, lambda _msg: None)
+
+    assert _git(repo_path, "remote", "get-url", "origin") == (
+        "http://git.example.local:8888/git/example-org/my-repo.git"
+    )
+    # 2 回目は既存の作業ツリーの origin を検証して、そのまま使う。
+    assert review._prepare_repo(pr, lambda _msg: None) == repo_path
 
 
 @需要git
@@ -401,20 +425,20 @@ def test_初期化に失敗したら中途半端なディレクトリを残さ�
 
     with pytest.raises(ReviewError, match="remote add"):
         review._prepare_repo(pr, lambda _msg: None)
-    assert not (work / "my-repo").exists()
+    assert not (work / "example-org" / "my-repo").exists()
 
 
 @需要git
 def test_作業ディレクトリの_remote_が_pr_と違えば実行しない(temp_paths, monkeypatch):
     work, _ = temp_paths
-    repo_path = work / "my-repo"
+    repo_path = work / "example-org" / "my-repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin",
          "https://github.com/example-org/other-repo.git"],
         check=True,
     )
-    monkeypatch.setattr(github_auth, "get_provider", lambda: None)
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: None)
     pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
 
     with pytest.raises(ReviewError, match="一致しません"):
@@ -424,7 +448,7 @@ def test_作業ディレクトリの_remote_が_pr_と違えば実行しない(t
 @需要git
 def test_remote_url_の形式が想定外なら実行しない(temp_paths, monkeypatch):
     work, _ = temp_paths
-    repo_path = work / "my-repo"
+    repo_path = work / "example-org" / "my-repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin",
@@ -439,7 +463,7 @@ def test_remote_url_の形式が想定外なら実行しない(temp_paths, monke
 
 def test_git_リポジトリでないディレクトリは弾く(temp_paths):
     work, _ = temp_paths
-    (work / "my-repo").mkdir()
+    (work / "example-org" / "my-repo").mkdir(parents=True)
     pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
 
     with pytest.raises(ReviewError, match="git リポジトリではありません"):
@@ -451,7 +475,7 @@ def test_git_リポジトリでないディレクトリは弾く(temp_paths):
 def fake_token(monkeypatch):
     """_git_env が呼ぶトークン取得を差し替える (ローカルの upstream には要らない)。"""
     monkeypatch.setattr(
-        github_auth, "get_provider", lambda: SimpleNamespace(token=lambda: "t")
+        github_auth, "get_provider", lambda *_: SimpleNamespace(token=lambda: "t")
     )
 
 

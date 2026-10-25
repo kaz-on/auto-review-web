@@ -111,8 +111,8 @@ def test_installation_id_未指定なら_owner_から解決して以後使い回
     api_calls, fake_jwt, monkeypatch
 ):
     calls, _ = api_calls
-    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
-    provider = _provider()
+    owner = "example-org"
+    provider = _provider(owner=owner)
 
     provider.token()
     provider.invalidate()
@@ -133,7 +133,7 @@ def _not_found(path: str) -> github_api.ApiError:
 
 def test_org_で見つからなければ個人アカウントとして引き直す(monkeypatch, fake_jwt):
     """/orgs/{org}/installation は Organization 専用で、個人アカウントには使えない。"""
-    monkeypatch.setattr(config, "REVIEW_OWNER", "some-user")
+    owner = "some-user"
     paths: list[str] = []
 
     def fake_api_request(method, path, *, authorization, body=None):
@@ -146,7 +146,7 @@ def test_org_で見つからなければ個人アカウントとして引き直�
 
     monkeypatch.setattr(github_api, "api_request", fake_api_request)
 
-    assert _provider().token() == "ghs_1"
+    assert _provider(owner=owner).token() == "ghs_1"
     assert paths == [
         "/orgs/some-user/installation",
         "/users/some-user/installation",
@@ -155,7 +155,7 @@ def test_org_で見つからなければ個人アカウントとして引き直�
 
 
 def test_app_が_owner_に入っていなければ分かる形で失敗する(monkeypatch, fake_jwt):
-    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
+    owner = "example-org"
 
     def fake_api_request(method, path, *, authorization, body=None):
         raise _not_found(path)
@@ -163,12 +163,12 @@ def test_app_が_owner_に入っていなければ分かる形で失敗する(mo
     monkeypatch.setattr(github_api, "api_request", fake_api_request)
 
     with pytest.raises(ReviewError, match="インストールされていません"):
-        _provider().token()
+        _provider(owner=owner).token()
 
 
 def test_404_以外のエラーは引き直さずにそのまま返す(monkeypatch, fake_jwt):
     """JWT の不備などを「インストールされていない」と取り違えない。"""
-    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
+    owner = "example-org"
     paths: list[str] = []
 
     def fake_api_request(method, path, *, authorization, body=None):
@@ -178,7 +178,7 @@ def test_404_以外のエラーは引き直さずにそのまま返す(monkeypat
     monkeypatch.setattr(github_api, "api_request", fake_api_request)
 
     with pytest.raises(github_api.ApiError, match="JSON web token"):
-        _provider().token()
+        _provider(owner=owner).token()
     assert paths == ["/orgs/example-org/installation"]
 
 
@@ -295,7 +295,7 @@ def test_pat_モードでは_gh_token_を使う(monkeypatch):
     monkeypatch.setattr(config, "GITHUB_AUTH_MODE", "pat")
     monkeypatch.setattr(config, "GH_TOKEN", "ghp_xxx")
 
-    provider = github_auth.build_provider()
+    provider = github_auth.build_provider("example-org")
 
     assert isinstance(provider, PatTokenProvider)
     assert provider.token() == "ghp_xxx"
@@ -306,7 +306,7 @@ def test_pat_モードで_gh_token_が無ければ失敗する(monkeypatch):
     monkeypatch.setattr(config, "GH_TOKEN", "")
 
     with pytest.raises(ReviewError, match="GH_TOKEN"):
-        github_auth.build_provider()
+        github_auth.build_provider("example-org")
 
 
 def test_app_モードでは設定から_provider_を組む(monkeypatch, tmp_path):
@@ -318,10 +318,11 @@ def test_app_モードでは設定から_provider_を組む(monkeypatch, tmp_pat
     monkeypatch.setattr(config, "GITHUB_APP_INSTALLATION_ID", "999")
     monkeypatch.setattr(config, "GITHUB_TOKEN_REFRESH_MARGIN", 123)
 
-    provider = github_auth.build_provider()
+    provider = github_auth.build_provider("example-org")
 
     assert isinstance(provider, AppTokenProvider)
     assert provider._installation_id == "999"
+    assert provider._owner == "example-org"
     assert provider._refresh_margin == 123
     assert provider._private_key == "KEY"
 
@@ -331,18 +332,42 @@ def test_app_モードで_client_id_が無ければ失敗する(monkeypatch):
     monkeypatch.setattr(config, "GITHUB_APP_CLIENT_ID", "")
 
     with pytest.raises(ReviewError, match="GITHUB_APP_CLIENT_ID"):
-        github_auth.build_provider()
+        github_auth.build_provider("example-org")
 
 
 def test_知らないモードは失敗させる(monkeypatch):
     monkeypatch.setattr(config, "GITHUB_AUTH_MODE", "oauth")
 
     with pytest.raises(ReviewError, match="GITHUB_AUTH_MODE"):
-        github_auth.build_provider()
+        github_auth.build_provider("example-org")
 
 
-def test_provider_はプロセス全体で一つ(monkeypatch):
-    monkeypatch.setattr(config, "GITHUB_AUTH_MODE", "pat")
-    monkeypatch.setattr(config, "GH_TOKEN", "ghp_xxx")
+def test_installation_id_はオーナーが複数なら指定できない(monkeypatch, tmp_path):
+    """installation はオーナーごとに違うので、1 つの ID を使い回すと取り違える。"""
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("KEY")
+    monkeypatch.setattr(config, "GITHUB_AUTH_MODE", "app")
+    monkeypatch.setattr(config, "GITHUB_APP_CLIENT_ID", "Iv1.abc")
+    monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setattr(config, "GITHUB_APP_INSTALLATION_ID", "999")
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("org-a", "org-b"))
 
-    assert github_auth.get_provider() is github_auth.get_provider()
+    with pytest.raises(ReviewError, match="GITHUB_APP_INSTALLATION_ID"):
+        github_auth.build_provider("org-a")
+
+
+def test_provider_はオーナーごとに一つ(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("KEY")
+    monkeypatch.setattr(config, "GITHUB_AUTH_MODE", "app")
+    monkeypatch.setattr(config, "GITHUB_APP_CLIENT_ID", "Iv1.abc")
+    monkeypatch.setattr(config, "GITHUB_APP_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setattr(config, "GITHUB_APP_INSTALLATION_ID", "")
+
+    a = github_auth.get_provider("org-a")
+
+    assert github_auth.get_provider("org-a") is a
+    b = github_auth.get_provider("org-b")
+    assert b is not a
+    # それぞれ自分のオーナーの installation を引く。
+    assert (a._owner, b._owner) == ("org-a", "org-b")

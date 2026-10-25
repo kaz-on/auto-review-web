@@ -13,7 +13,7 @@
 
 | 列 | 内容 |
 | --- | --- |
-| `review_id` / `repo` / `pr_number` / `pr_url` / `pr_title` | レビューと PR。タイトルは集計タブと同じキャッシュから引く（未取得なら空欄） |
+| `review_id` / `owner` / `repo` / `pr_number` / `pr_url` / `pr_title` | レビューと PR。タイトルは集計タブと同じキャッシュから引く（未取得なら空欄） |
 | `pr_author` | PR の作成者（GitHub のログイン名） |
 | `rev` / `is_latest_rev` | 同じ PR の何回目のレビューか / その PR の最新のレビューか |
 | `created_at` | レビューした日時 |
@@ -25,7 +25,7 @@
 
 ## `findings.csv`（指摘 1 件 = 1 行）
 
-`review_id` / `repo` / `pr_number` / `pr_author` / `rev` / `is_latest_rev` / `created_at` / `include_quality` / `priority` / `title` / `path` / `start_line` / `end_line` / `description`。
+`review_id` / `owner` / `repo` / `pr_number` / `pr_author` / `rev` / `is_latest_rev` / `created_at` / `include_quality` / `priority` / `title` / `path` / `start_line` / `end_line` / `description`。
 
 `path` はリポジトリのルートからの相対パス。`description` は複数行になることがある（CSV の規則どおりに引用符で囲む）。指摘の無いレビューは行を出さないので、0 件のレビューも数えたいときは `reviews.csv` を使う。
 
@@ -37,6 +37,7 @@ PR への投稿と同じく、`- [P1] タイトル — パス:行` の形の箇�
 
 ## 集計するときの注意
 
+- **リポジトリはオーナーと組で識別する。** オーナーが違えば同じ名前のリポジトリも別のものなので、リポジトリ単位で集計するときは `owner` と `repo` の組でまとめる。
 - **同じ PR に複数のレビューがある。** やり直したレビューも 1 行ずつ出すので、PR 単位で数えるなら `is_latest_rev == 1` で絞るなど、どれを使うかを決める。
 - **実行条件で指摘の数の基準が変わる。** 品質改善を含めた実行（`include_quality == 1`）は指摘が大きく増える。モデルや reasoning effort も同様。人や期間で比べるときはこれらで分けて集計する。
 - **指摘の数は変更の規模にも比例する。** 必要なら `pr_additions + pr_deletions` などで割った値も見る。

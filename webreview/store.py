@@ -44,7 +44,8 @@ SELECT j.*,
        r.base_ref AS base_ref,
        (SELECT COUNT(*) FROM job_progress p WHERE p.job_id = j.id) AS progress_count
   FROM jobs j
-  LEFT JOIN pr_titles t ON t.repo = j.repo AND t.pr_number = j.number
+  LEFT JOIN pr_titles t ON t.owner = j.owner AND t.repo = j.repo
+                       AND t.pr_number = j.number
   LEFT JOIN reviews   r ON r.id = j.review_id
 """
 
@@ -238,19 +239,19 @@ def create_unless_reviewed(
     同じ PR を重ねて積まないようにする。失敗したジョブは数えないので、次の投入で
     やり直せる。
 
-    reviews はオーナーを持たない (REVIEW_OWNER で 1 つに固定される) ため、
-    PR はリポジトリ名と番号で照合する。判定と INSERT を同じ書き込みトランザクション
-    で行うので、同時に投入されても二重には積まれない。
+    PR はオーナー・リポジトリ名・番号で照合する。判定と INSERT を同じ書き込み
+    トランザクションで行うので、同時に投入されても二重には積まれない。
     """
     with db.write() as conn:
         active = conn.execute(
-            "SELECT id FROM jobs WHERE repo = ? AND number = ? AND status IN (?, ?) "
-            "ORDER BY created_at DESC LIMIT 1",
-            (repo, number, *_ACTIVE),
+            "SELECT id FROM jobs WHERE owner = ? AND repo = ? AND number = ? "
+            "AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1",
+            (owner, repo, number, *_ACTIVE),
         ).fetchone()
         review = conn.execute(
-            "SELECT MAX(id) AS id FROM reviews WHERE repo = ? AND pr_number = ?",
-            (repo, number),
+            "SELECT MAX(id) AS id FROM reviews "
+            "WHERE owner = ? AND repo = ? AND pr_number = ?",
+            (owner, repo, number),
         ).fetchone()
         if active is None and review["id"] is None:
             job_id = _insert(conn, url, owner, repo, number, auto_post, include_quality)

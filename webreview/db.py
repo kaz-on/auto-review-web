@@ -23,11 +23,15 @@ _BUSY_TIMEOUT_MS = 10_000
 
 _local = threading.local()
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS reviews (
+# reviews はオーナーを足したときに作り直す必要があったので (UNIQUE 制約は後から
+# 変えられない)、移行先の一時テーブルにも同じ定義を使えるよう名前を差し込む形にしてある。
+_REVIEWS_TABLE = """
+CREATE TABLE IF NOT EXISTS {name} (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- PR のリポジトリのオーナー。REVIEW_OWNER が 1 つに固定だった頃は持っていなかった。
+    owner            TEXT    NOT NULL,
     repo             TEXT    NOT NULL,
     pr_number        INTEGER NOT NULL,
     rev              INTEGER NOT NULL,
@@ -59,11 +63,13 @@ CREATE TABLE IF NOT EXISTS reviews (
     -- err ログの実体。期限削除したら NULL に戻し pruned_at を立てる。
     stderr_path      TEXT,
     stderr_pruned_at REAL,
-    UNIQUE (repo, pr_number, rev)
+    UNIQUE (owner, repo, pr_number, rev)
 );
+"""
 
+_SCHEMA = _REVIEWS_TABLE.format(name="reviews") + """
 CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_reviews_repo_pr    ON reviews (repo, pr_number);
+CREATE INDEX IF NOT EXISTS idx_reviews_pr         ON reviews (owner, repo, pr_number);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT    PRIMARY KEY,
@@ -99,11 +105,12 @@ CREATE TABLE IF NOT EXISTS job_progress (
 
 -- PR タイトルのキャッシュ。fetched_at で失効させる (PR 名は変更されうる)。
 CREATE TABLE IF NOT EXISTS pr_titles (
+    owner      TEXT    NOT NULL,
     repo       TEXT    NOT NULL,
     pr_number  INTEGER NOT NULL,
     title      TEXT    NOT NULL,
     fetched_at REAL    NOT NULL,
-    PRIMARY KEY (repo, pr_number)
+    PRIMARY KEY (owner, repo, pr_number)
 );
 """
 
@@ -122,11 +129,64 @@ _ADDED_COLUMNS = (
 )
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    """テーブルの列名。テーブルが無ければ空。"""
+    return [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
     for table, column, decl in _ADDED_COLUMNS:
-        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-        if column not in existing:
+        if column not in _columns(conn, table):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def _add_owner(conn: sqlite3.Connection) -> None:
+    """オーナーを持たない reviews / pr_titles を、オーナー付きの形に作り直す。
+
+    REVIEW_OWNER が 1 つに固定だった頃の DB が対象。UNIQUE 制約と主キーにオーナーを
+    含めるため、列の追加では済まずテーブルを作り直す。
+
+    既存のレビューのオーナーは、そのレビューを生んだジョブから引く。ジョブが消えて
+    いれば、REVIEW_OWNER の先頭を使う (当時はオーナーが 1 つだったので、設定を
+    変える前に移行すれば正しく埋まる)。pr_titles は取り直せるキャッシュなので、
+    中身は引き継がずに作り直す。
+
+    reviews を消すと jobs.review_id の ON DELETE SET NULL が働いてしまうため、
+    外部キーを切った状態で作り直す (SQLite が推奨する手順)。PRAGMA foreign_keys は
+    トランザクションの中では変えられないので、その外側で切り替える。
+    """
+    columns = _columns(conn, "reviews")
+    if not columns or "owner" in columns:
+        return
+
+    fallback = config.REVIEW_OWNERS[0] if config.REVIEW_OWNERS else ""
+    # 作り直す前のスキーマに jobs が無いことはまずないが、無ければ設定から埋める。
+    if _columns(conn, "jobs"):
+        owner_expr = (
+            "COALESCE((SELECT j.owner FROM jobs j WHERE j.review_id = r.id "
+            "ORDER BY j.created_at DESC LIMIT 1), ?)"
+        )
+    else:
+        owner_expr = "?"
+    copied = ", ".join(columns)
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        with write() as w:
+            w.execute(_REVIEWS_TABLE.format(name="reviews_new"))
+            w.execute(
+                f"INSERT INTO reviews_new (owner, {copied}) "
+                f"SELECT {owner_expr}, {copied} FROM reviews r",
+                (fallback,),
+            )
+            w.execute("DROP TABLE reviews")
+            w.execute("ALTER TABLE reviews_new RENAME TO reviews")
+            w.execute("DROP TABLE IF EXISTS pr_titles")
+            # 作り直しで参照先が欠けていないか (jobs.review_id は reviews の id を保つ)。
+            if w.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise RuntimeError("reviews の作り直しで外部キーの整合が崩れました。")
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _configure(conn: sqlite3.Connection) -> None:
@@ -176,6 +236,9 @@ def init() -> None:
             f"データベースのスキーマ ({current}) がこのアプリ "
             f"({SCHEMA_VERSION}) より新しいため起動できません: {config.DB_PATH}"
         )
+    # オーナーを足す作り直しは、新しいスキーマの索引 (オーナーを含む) より先に行う。
+    # 作り直しは 1 つのトランザクションなので、途中で失敗しても元の形のまま残る。
+    _add_owner(conn)
     # executescript は暗黙に COMMIT を挟むため、明示トランザクションでは包まない。
     # CREATE ... IF NOT EXISTS と不足列の追加だけなので、途中で失敗しても
     # 再実行で回復できる。

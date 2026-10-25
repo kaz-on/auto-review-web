@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from webreview import config, db, github_auth
+from webreview import config, db, forge, github_auth
 
 
 def _reset_db_connections() -> None:
@@ -68,15 +68,23 @@ def temp_paths(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_auth_provider():
     """プロセス全体で共有される TokenProvider がテスト間に漏れないようにする。"""
-    github_auth._PROVIDER = None
+    github_auth._PROVIDERS.clear()
     yield
-    github_auth._PROVIDER = None
+    github_auth._PROVIDERS.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_forge():
+    """forge は設定から 1 度だけ組み立てるので、テストで設定を変えたら作り直させる。"""
+    forge._FORGE = None
+    yield
+    forge._FORGE = None
 
 
 @pytest.fixture
 def review_owner(monkeypatch):
     """レビュー対象のオーナーを固定する。"""
-    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("example-org",))
     return "example-org"
 
 

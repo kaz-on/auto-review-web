@@ -19,11 +19,23 @@ def _env_path(name: str, default: Path) -> Path:
     return Path(value).expanduser().resolve() if value else default
 
 
+def _owners(value: str) -> tuple[str, ...]:
+    """カンマ区切りのオーナー名を、空要素と重複を除いて書かれた順に並べる。"""
+    owners: list[str] = []
+    for name in value.split(","):
+        name = name.strip()
+        if name and name not in owners:
+            owners.append(name)
+    return tuple(owners)
+
+
 # --- レビュー対象の制約 ------------------------------------------------------
 # 許可するリポジトリのオーナー (Organization 名または個人アカウント名)。
-# これ以外のリポジトリはレビューできない。
+# カンマ区切りで複数指定できる。これ以外のリポジトリはレビューできない。
 # 必須。未設定 (空) のときはどのリポジトリもレビューできない (fail-closed)。
-REVIEW_OWNER = os.environ.get("REVIEW_OWNER", "").strip()
+# 「すべて許可」の指定は設けない — 認証の無いこのツールでは、オーナーの制約が
+# レビュー・投稿できる範囲を絞る唯一の関門なので。
+REVIEW_OWNERS = _owners(os.environ.get("REVIEW_OWNER", ""))
 
 # codex に渡すレビューモデル。
 REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-6.1-sol")
@@ -37,14 +49,47 @@ REVIEW_REASONING_EFFORT = os.environ.get("REVIEW_REASONING_EFFORT", "medium").st
 REVIEW_DESCRIPTION = os.environ.get("REVIEW_DESCRIPTION", "").replace("\\n", "\n").strip()
 
 
+# --- PR をホストするサービス ------------------------------------------------
+# "github" = github.com と、GitHub 互換の REST API を持つサービス (GITHUB_* で設定)。
+# "gitlab" = GitLab (GITLAB_* で設定)。
+# 1 つのインスタンスで扱えるのはどちらか一方だけ。
+REVIEW_FORGE = os.environ.get("REVIEW_FORGE", "").strip().lower() or "github"
+
+# GitHub の既定は github.com。GitHub 互換の REST API を持つセルフホストのサービスを
+# 使うときは、以下をそのサービスに合わせる (README「GitHub 互換のサービス」)。
+
+# Web の URL。PR の URL はこの下の /<owner>/<repo>/pull/<番号> の形で受け付ける。
+GITHUB_WEB_URL = (
+    os.environ.get("GITHUB_WEB_URL", "").strip() or "https://github.com"
+).rstrip("/")
+
+# REST API のベース URL。
+GITHUB_API_URL = (
+    os.environ.get("GITHUB_API_URL", "").strip() or "https://api.github.com"
+).rstrip("/")
+
+# 作業ディレクトリの origin にする URL。{web} / {owner} / {repo} を置き換える。
+GITHUB_CLONE_URL = (
+    os.environ.get("GITHUB_CLONE_URL", "").strip() or "{web}/{owner}/{repo}.git"
+)
+
+# git の認証に使うユーザー名。github.com はトークンの種類によらずこの固定値で通るが、
+# サービスによってはトークンの持ち主のアカウント名でないと通らない。
+GITHUB_GIT_USERNAME = (
+    os.environ.get("GITHUB_GIT_USERNAME", "").strip() or "x-access-token"
+)
+
+# 投稿の方法。
+# "review" = レビュー API (pulls/{n}/reviews) で、指摘をソース行へのコメントにする。
+# "issue_comment" = 本文全体を 1 件のコメント (issues/{n}/comments) として投稿する。
+#                   レビュー API の無いサービス向け。
+GITHUB_POST_MODE = os.environ.get("GITHUB_POST_MODE", "").strip().lower() or "review"
+
+
 # --- GitHub 認証 --------------------------------------------------------------
 # "pat" = GH_TOKEN の Personal Access Token をそのまま使う。
 # "app" = GitHub App の秘密鍵から installation access token を都度発行する。
 GITHUB_AUTH_MODE = os.environ.get("GITHUB_AUTH_MODE", "pat").strip().lower()
-
-# GitHub REST API のベース URL。PR や clone の URL は github.com 固定なので、
-# これを変えても GitHub Enterprise Server には対応しない。
-GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
 # pat モード用。
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
@@ -54,11 +99,23 @@ GH_TOKEN = os.environ.get("GH_TOKEN", "")
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "").strip()
 # 秘密鍵はファイルで渡す (read-only マウントを想定)。
 GITHUB_APP_PRIVATE_KEY_PATH = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip()
-# 省略時は REVIEW_OWNER の installation を API で解決する。
+# 省略時は REVIEW_OWNER の installation を API で解決する。オーナーごとに
+# installation が分かれるので、指定できるのはオーナーが 1 つのときだけ。
 GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "").strip()
 
 # installation access token (有効期間 1 時間) の残りがこれを下回ったら再発行する (秒)。
 GITHUB_TOKEN_REFRESH_MARGIN = int(os.environ.get("GITHUB_TOKEN_REFRESH_MARGIN", "300"))
+
+
+# --- GitLab ------------------------------------------------------------------
+# REVIEW_FORGE=gitlab のときに使う。
+
+# GitLab の URL (例: https://gitlab.example.com)。API はこの下の /api/v4。
+GITLAB_URL = os.environ.get("GITLAB_URL", "").strip().rstrip("/")
+
+# GitLab のアクセストークン。グループアクセストークン (Reporter、スコープ api と
+# read_repository) を想定する。README「GitLab」を参照。
+GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "").strip()
 
 
 # --- データの保存先 ----------------------------------------------------------
@@ -97,6 +154,24 @@ REVIEW_TIMEOUT = int(os.environ.get("REVIEW_TIMEOUT", "3600"))
 # 認証が無いため、既定では実行している PC 自身からしか接続できないようにする。
 HOST = os.environ.get("REVIEW_HOST", "127.0.0.1")
 PORT = int(os.environ.get("REVIEW_PORT", "8080"))
+
+
+def repo_work_path(owner: str, repo: str) -> Path:
+    """リポジトリの作業ツリー。オーナーが違えば同じ名前のリポジトリも別の場所になる。"""
+    return WORK_PATH / owner / repo
+
+
+def legacy_repo_work_path(repo: str) -> Path:
+    """オーナーを 1 つに固定していた頃の作業ツリー (REVIEW_WORK_PATH/<repo>)。
+
+    その頃のレビュー本文に残るパスを、リポジトリからの相対パスに直すときにだけ使う。
+    """
+    return WORK_PATH / repo
+
+
+def repo_logs_path(owner: str, repo: str) -> Path:
+    """リポジトリの codex 生ログの置き場所。"""
+    return LOGS_PATH / owner / repo
 
 
 def ensure_dirs() -> None:

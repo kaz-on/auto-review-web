@@ -53,9 +53,40 @@ def test_pr_の_url_形式でなければ弾く(review_owner, url):
 
 
 def test_review_owner_が未設定なら誰のリポジトリも通さない(monkeypatch):
-    monkeypatch.setattr(config, "REVIEW_OWNER", "")
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ())
     with pytest.raises(ReviewError, match="REVIEW_OWNER"):
         parse_pr_url("https://github.com/anyone/my-repo/pull/1")
+
+
+@pytest.mark.parametrize("owner", ["team-a", "team-b"])
+def test_複数指定したオーナーはどれも通す(monkeypatch, owner):
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("team-a", "team-b"))
+
+    pr = parse_pr_url(f"https://github.com/{owner}/my-repo/pull/1")
+
+    assert pr.owner == owner
+
+
+def test_複数指定したオーナーのどれでもなければ弾く(monkeypatch):
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("team-a", "team-b"))
+
+    with pytest.raises(ReviewError, match="team-a, team-b"):
+        parse_pr_url("https://github.com/team-c/my-repo/pull/1")
+
+
+def test_オーナー名は前方一致や大文字小文字の違いでは通さない(monkeypatch):
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("team-a",))
+
+    for owner in ("team-ab", "team", "Team-A"):
+        with pytest.raises(ReviewError, match="いずれでもありません"):
+            parse_pr_url(f"https://github.com/{owner}/my-repo/pull/1")
+
+
+@pytest.mark.parametrize("repo", [".", ".."])
+def test_作業ディレクトリの外を指すリポジトリ名は弾く(review_owner, repo):
+    """オーナーとリポジトリ名はそのまま作業ディレクトリのパスになる。"""
+    with pytest.raises(ReviewError, match="PR URL 形式ではありません"):
+        parse_pr_url(f"https://github.com/example-org/{repo}/pull/1")
 
 
 def test_別のオーナーのリポジトリは弾く(review_owner):

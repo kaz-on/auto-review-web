@@ -46,8 +46,8 @@ def fake_codex(tmp_path, monkeypatch):
 def stub_git(monkeypatch, temp_paths):
     """git の準備と checkout を差し替え、渡された引数を記録する。"""
     work, _ = temp_paths
-    repo_path = work / PR.repo
-    repo_path.mkdir()
+    repo_path = work / PR.owner / PR.repo
+    repo_path.mkdir(parents=True)
     seen: dict = {}
 
     def fake_prepare(pr, progress):
@@ -65,7 +65,7 @@ def stub_git(monkeypatch, temp_paths):
 
 @pytest.fixture
 def stub_github(monkeypatch):
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
     monkeypatch.setattr(
         github_api, "get_pull",
         lambda *a, **k: github_api.PullRequest(
@@ -127,7 +127,7 @@ def test_品質改善を含める指定はプロンプトとレビューに残�
 def test_pr_のタイトルをキャッシュする(fake_codex, stub_git, stub_github):
     review.run_review(PR)
 
-    assert reviews.cached_title(PR.repo, PR.number) == "PR のタイトル"
+    assert reviews.cached_title(PR.owner, PR.repo, PR.number) == "PR のタイトル"
 
 
 def test_pr_の作成者と変更の規模をレビューに記録する(fake_codex, stub_git, stub_github):
@@ -143,12 +143,12 @@ def test_err_ログは_rev_付きの_gzip_で残る(fake_codex, stub_git, stub_g
 
     result = review.run_review(PR)
 
-    path = logs / PR.repo / "codex_review_pr7_err.log-0.gz"
+    path = logs / PR.owner / PR.repo / "codex_review_pr7_err.log-0.gz"
     # 置き場所はレビュー登録後に結び付けるので、返り値ではなく DB を見る。
     assert reviews.get(result.id).stderr_path == str(path)
     assert "OpenAI Codex v1.2.3" in gzip.open(path, "rt").read()
     # 一時ファイルは残さない。
-    assert [p.name for p in (logs / PR.repo).iterdir()] == [path.name]
+    assert [p.name for p in (logs / PR.owner / PR.repo).iterdir()] == [path.name]
 
 
 def test_同じ_pr_を再実行すると_rev_が上がる(fake_codex, stub_git, stub_github, temp_paths):
@@ -157,7 +157,7 @@ def test_同じ_pr_を再実行すると_rev_が上がる(fake_codex, stub_git, 
     assert review.run_review(PR).rev == 0
     assert review.run_review(PR).rev == 1
 
-    names = sorted(p.name for p in (logs / PR.repo).iterdir())
+    names = sorted(p.name for p in (logs / PR.owner / PR.repo).iterdir())
     assert names == [
         "codex_review_pr7_err.log-0.gz", "codex_review_pr7_err.log-1.gz",
     ]
@@ -177,11 +177,11 @@ def test_codex_が失敗したらレビューを残さず一時ログも片付�
         review.run_review(PR)
 
     assert reviews.count() == 0
-    assert list((logs / PR.repo).iterdir()) == []
+    assert list((logs / PR.owner / PR.repo).iterdir()) == []
 
 
 def test_pr_の情報が取れなければ_git_にも触らない(monkeypatch, stub_git):
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
 
     def fail(*a, **k):
         raise github_api.ApiError("PR が見つかりません", status=404)
@@ -200,7 +200,7 @@ def capture_post(monkeypatch):
     calls: list[dict] = []
     errors: list[Exception] = []
 
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
 
     def fake_create_review(
         provider, owner, repo, number, body, *, comments=None, commit_id=None
@@ -218,15 +218,16 @@ def capture_post(monkeypatch):
     return calls, errors
 
 
-def _review_with_findings(work):
-    """位置の読める指摘を 1 件持つレビューを作る。"""
+def _review_with_findings(root):
+    """位置の読める指摘を 1 件持つレビューを作る。root は codex が動いた作業ツリー。"""
     return reviews.create(
+        owner=PR.owner,
         repo=PR.repo,
         pr_number=PR.number,
         body=(
             "全体の要約。\n\n"
             "Full review comments:\n\n"
-            f"- [P1] 指摘 — {work / PR.repo / 'order.py'}:16-16\n"
+            f"- [P1] 指摘 — {root / 'order.py'}:16-16\n"
             "  説明。\n"
         ),
         head_commit="headcommit5678",
@@ -237,7 +238,7 @@ def _review_with_findings(work):
 def test_位置の読める指摘はソース行へのコメントにする(capture_post, temp_paths):
     calls, _ = capture_post
     work, _ = temp_paths
-    created = _review_with_findings(work)
+    created = _review_with_findings(work / PR.owner / PR.repo)
     lines: list[str] = []
 
     review.post_review(PR, created.id, progress=lines.append)
@@ -258,10 +259,21 @@ def test_位置の読める指摘はソース行へのコメントにする(capt
     assert any("ソース行" in line for line in lines)
 
 
+def test_オーナーを固定していた頃のレビューも行コメントにできる(capture_post, temp_paths):
+    """当時は REVIEW_WORK_PATH/<repo> で codex が動いていた。"""
+    calls, _ = capture_post
+    work, _ = temp_paths
+    created = _review_with_findings(work / PR.repo)
+
+    review.post_review(PR, created.id)
+
+    assert [c["path"] for c in calls[0]["comments"]] == ["order.py"]
+
+
 def test_位置が読めなければヘッダ付きの本文だけを送る(capture_post):
     calls, _ = capture_post
     created = reviews.create(
-        repo=PR.repo, pr_number=PR.number, body="## 指摘", model="m"
+        owner=PR.owner, repo=PR.repo, pr_number=PR.number, body="## 指摘", model="m"
     )
 
     review.post_review(PR, created.id)
@@ -279,7 +291,7 @@ def test_行コメントが弾かれたら本文にまとめて投稿し直す(c
     calls, errors = capture_post
     work, _ = temp_paths
     errors.append(github_api.ApiError("Path could not be resolved", status=422))
-    created = _review_with_findings(work)
+    created = _review_with_findings(work / PR.owner / PR.repo)
     lines: list[str] = []
 
     review.post_review(PR, created.id, progress=lines.append)
@@ -297,7 +309,7 @@ def test_422_以外の失敗は投稿の失敗として伝える(capture_post, t
     calls, errors = capture_post
     work, _ = temp_paths
     errors.append(github_api.ApiError("Not Found", status=404))
-    created = _review_with_findings(work)
+    created = _review_with_findings(work / PR.owner / PR.repo)
 
     with pytest.raises(ReviewError, match="Not Found"):
         review.post_review(PR, created.id)

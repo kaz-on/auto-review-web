@@ -71,8 +71,8 @@ def test_未レビューの_pr_ならジョブを作る():
 
 def test_レビュー済みの_pr_ならジョブを作らない():
     job = _create()
-    older = reviews.create(repo="my-repo", pr_number=1, body="a")
-    newer = reviews.create(repo="my-repo", pr_number=1, body="b")
+    older = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="a")
+    newer = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="b")
     store.update(job.id, status=store.SUCCEEDED, review_id=newer.id)
     # ジョブ履歴を消してもレビューは残るので、判定は変わらない。
     store.delete(job.id)
@@ -105,9 +105,19 @@ def test_失敗したジョブしかなければ作り直す():
 
 
 def test_別の_pr_のレビューは判定に影響しない():
-    reviews.create(repo="my-repo", pr_number=2, body="a")
-    reviews.create(repo="other-repo", pr_number=1, body="a")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=2, body="a")
+    reviews.create(owner="example-org", repo="other-repo", pr_number=1, body="a")
     _create(number=3)
+
+    assert isinstance(_create_unless_reviewed(number=1), store.Job)
+
+
+def test_別のオーナーの同じ名前のリポジトリは判定に影響しない():
+    reviews.create(owner="other-org", repo="my-repo", pr_number=1, body="a")
+    store.create(
+        url="https://github.com/other-org/my-repo/pull/1",
+        owner="other-org", repo="my-repo", number=1,
+    )
 
     assert isinstance(_create_unless_reviewed(number=1), store.Job)
 
@@ -319,7 +329,7 @@ def test_期限内のジョブは消さない():
 
 
 def test_未投稿のレビューは古くても残す():
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     job = _finished(review_id=review.id)
 
     assert store.prune(retention_days=30) == 0
@@ -334,7 +344,7 @@ def test_失敗したジョブは古くても残す():
 
 
 def test_同じ_pr_をやり直していれば失敗や未投稿も消す():
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     failed = _finished(number=1, status=store.FAILED)
     unposted = _finished(number=1, review_id=review.id)
     latest = _create(number=1)
@@ -366,7 +376,7 @@ def test_保持日数が_0_なら消さない(monkeypatch):
 
 
 def test_古いジョブを消してもレビュー本体は残る():
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     _finished(review_id=review.id, posted=True)
 
     store.prune(retention_days=30)

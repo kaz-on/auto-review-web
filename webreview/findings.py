@@ -9,8 +9,10 @@ codex の出力は自由記述なので、書式が読み取れたものだけ�
       指摘の説明。次の箇条書きまでが 1 件ぶん。
 
 パスは codex が動いた作業ツリーの絶対パスで出るため、リポジトリのルート
-(REVIEW_WORK_PATH/<repo>) からの相対パスに直す。直せないパスは GitHub 側でも
-解決できない (422 になる) ので、行コメントにはせず本文に残す。
+(REVIEW_WORK_PATH/<owner>/<repo>) からの相対パスに直す。オーナーを 1 つに固定して
+いた頃のレビューは REVIEW_WORK_PATH/<repo> で動いているので、ルートの候補は複数
+受け取り、最初に直せたもので解決する。直せないパスは GitHub 側でも解決できない
+(422 になる) ので、行コメントにはせず本文に残す。
 
 集計 (export) は同じ読み取り方 (parse) で指摘を数える。パスの解決は投稿のための
 もので、指摘であるかどうかには関わらない。
@@ -21,10 +23,14 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 __all__ = ["Finding", "Item", "Parsed", "extract", "parse"]
+
+# 作業ツリーのルート。候補が複数あるときは前から順に試す。
+Roots = Union[Path, Sequence[Path]]
 
 # 箇条書きの先頭行。優先度と行範囲は省略されることがある。
 # タイトルは貪欲に取り、行末の "パス:行" が成立する最後の区切りで切る
@@ -51,9 +57,9 @@ class Item:
     description: str
     priority: str | None = None
 
-    def resolve(self, repo_path: Path) -> Finding | None:
+    def resolve(self, roots: Roots) -> Finding | None:
         """行コメントにできる形に直す。パスがリポジトリの外を指せば None。"""
-        path = _relative_path(self.raw_path, repo_path)
+        path = _relative_path(self.raw_path, roots)
         if path is None:
             return None
         return Finding(
@@ -124,7 +130,7 @@ def parse(body: str) -> Parsed:
     return Parsed(items=items, unparsed=unparsed)
 
 
-def extract(body: str, repo_path: Path) -> tuple[str, list[Finding]]:
+def extract(body: str, roots: Roots) -> tuple[str, list[Finding]]:
     """本文を「行コメントにできなかった残り」と「指摘」に分ける。
 
     残りの本文は元の並びのまま返すので、全体の要約や書式の読めなかった箇条書きは
@@ -135,7 +141,7 @@ def extract(body: str, repo_path: Path) -> tuple[str, list[Finding]]:
 
     for block in _blocks(body.splitlines()):
         item = _read(block)
-        finding = item.resolve(repo_path) if item is not None else None
+        finding = item.resolve(roots) if item is not None else None
         if finding is None:
             kept.extend(block)
         else:
@@ -198,7 +204,7 @@ def _description(lines: list[str]) -> str:
     return "\n".join(line[indent:] if line.strip() else "" for line in body)
 
 
-def _relative_path(raw: str, repo_path: Path) -> str | None:
+def _relative_path(raw: str, roots: Roots) -> str | None:
     """作業ツリーのパスをリポジトリルートからの相対パスに直す。
 
     実際にファイルを見に行かず文字列だけで解決する。投稿はレビューから時間が
@@ -209,9 +215,17 @@ def _relative_path(raw: str, repo_path: Path) -> str | None:
         return None
 
     path = os.path.normpath(text)
-    if os.path.isabs(path):
-        path = os.path.relpath(path, os.path.normpath(str(repo_path)))
-    # ルートの外を指すパスは PR の差分に対応しない。
+    if not os.path.isabs(path):
+        return _inside(path)
+    for root in [roots] if isinstance(roots, Path) else roots:
+        relative = _inside(os.path.relpath(path, os.path.normpath(str(root))))
+        if relative is not None:
+            return relative
+    return None
+
+
+def _inside(path: str) -> str | None:
+    """ルートの外を指すパスは PR の差分に対応しないので None にする。"""
     if path.startswith("..") or os.path.isabs(path) or path == ".":
         return None
     return path

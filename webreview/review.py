@@ -11,8 +11,8 @@ git の作業ツリーは毎回 PR のコミットへ checkout --force + clean �
 残骸があっても復帰できる。単一ワーカーで直列実行される前提なので、共有の
 作業ディレクトリに対する git 操作が競合することはない。
 
-GitHub へのアクセスは REST API (github_api) と git コマンドの 2 経路。どちらも
-トークンは実行の直前に github_auth から取得し、その 1 回の呼び出しにだけ渡す。
+PR をホストするサービスへのアクセスは、REST API と git コマンドの 2 経路。どちらも
+forge 層を通し、トークンは実行の直前に取得してその 1 回の呼び出しにだけ渡す。
 git にはコマンドラインではなく環境変数経由の credential helper で渡すので、
 トークンが ps や進捗ログに現れることはない。
 
@@ -35,12 +35,11 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
-from . import config, findings, github_api, github_auth, reviews
+from . import config, forge, reviews
 from .errors import ReviewError
 
-ProgressFn = Callable[[str], None]
+from .forge import ProgressFn, PullRequest
 
 __all__ = [
     "ReviewError",
@@ -50,19 +49,11 @@ __all__ = [
     "post_review",
 ]
 
-# git の認証は「実行時の環境変数からトークンを読む credential helper」で行う。
+# git の認証は「実行時の環境変数から認証情報を読む credential helper」で行う。
 # こうするとイメージやホストに認証設定を残さず、submodule の子プロセスにも継承される。
-_CREDENTIAL_KEY = "credential.https://github.com.helper"
 _CREDENTIAL_HELPER = (
-    '!f() { if test "$1" = get; then echo username=x-access-token; '
-    'echo "password=$REVIEW_GH_TOKEN"; fi; }; f'
-)
-
-_PR_URL_RE = re.compile(
-    r"^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)(?:/.*)?$"
-)
-_REMOTE_RE = re.compile(
-    r"^(?:git@github\.com:|https://github\.com/)([^/]+)/([^/.]+)(?:\.git)?$"
+    '!f() { if test "$1" = get; then echo "username=$REVIEW_GIT_USERNAME"; '
+    'echo "password=$REVIEW_GIT_TOKEN"; fi; }; f'
 )
 
 
@@ -74,7 +65,7 @@ class ParsedPR:
 
     @property
     def url(self) -> str:
-        return f"https://github.com/{self.owner}/{self.repo}/pull/{self.number}"
+        return forge.get().pr_url(self.owner, self.repo, self.number)
 
 
 @dataclass
@@ -94,18 +85,24 @@ def parse_pr_url(pr_url: str) -> ParsedPR:
     if not pr_url:
         raise ReviewError("PR の URL を入力してください。")
 
-    m = _PR_URL_RE.match(pr_url)
-    if not m:
-        raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
+    host = forge.get()
+    parsed = host.parse_pr_url(pr_url)
+    if parsed is None:
+        raise ReviewError(f"{host.name} の PR URL 形式ではありません: {pr_url}")
 
-    owner, repo, number = m.group(1), m.group(2), int(m.group(3))
-    if not config.REVIEW_OWNER:
+    owner, repo, number = parsed
+    # オーナーとリポジトリ名はそのまま作業ディレクトリのパスになる (GitLab のオーナー
+    # はサブグループを含めて "/" で区切られる)。
+    if {*owner.split("/"), repo} & {"", ".", ".."}:
+        raise ReviewError(f"{host.name} の PR URL 形式ではありません: {pr_url}")
+    if not config.REVIEW_OWNERS:
         raise ReviewError(
             "REVIEW_OWNER が設定されていません。管理者に連絡してください。"
         )
-    if owner != config.REVIEW_OWNER:
+    if not any(host.owner_allowed(owner, allowed) for allowed in config.REVIEW_OWNERS):
         raise ReviewError(
-            f"リポジトリのオーナー ({owner}) が {config.REVIEW_OWNER} ではありません。"
+            f"リポジトリのオーナー ({owner}) が "
+            f"{', '.join(config.REVIEW_OWNERS)} のいずれでもありません。"
         )
     return ParsedPR(owner=owner, repo=repo, number=number)
 
@@ -138,21 +135,29 @@ def _run(
     return proc.stdout.strip()
 
 
-def _git_env() -> dict[str, str]:
-    """GitHub へアクセスする git コマンド用の環境変数。
+def _git_env(pr: ParsedPR) -> dict[str, str]:
+    """PR のリポジトリへアクセスする git コマンド用の環境変数。
 
     トークンはこの関数を呼んだ時点で取得するため、常に有効期限に余裕があるものが
     使われる。GIT_CONFIG_* で渡した設定は submodule などの子プロセスにも継承される。
     """
+    credential = forge.get().git_credential(pr.owner)
+    key = f"credential.{credential.url}.helper"
     env = dict(os.environ)
     env.update({
-        "REVIEW_GH_TOKEN": github_auth.get_provider().token(),
+        "REVIEW_GIT_USERNAME": credential.username,
+        "REVIEW_GIT_TOKEN": credential.password,
         # 既存の helper (ホストの gh 設定など) を空値で打ち消してから自前を差し込む。
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": _CREDENTIAL_KEY,
+        "GIT_CONFIG_COUNT": "3",
+        "GIT_CONFIG_KEY_0": key,
         "GIT_CONFIG_VALUE_0": "",
-        "GIT_CONFIG_KEY_1": _CREDENTIAL_KEY,
+        "GIT_CONFIG_KEY_1": key,
         "GIT_CONFIG_VALUE_1": _CREDENTIAL_HELPER,
+        # SHA を指定した fetch は、サーバによってはプロトコル v2 でしか通らない
+        # (v0 だと広告していないオブジェクトの要求として拒否される)。git 2.26 以降は
+        # 既定でも v2 だが、ホストの設定で v0 に戻されていても黙って失敗しないよう固定する。
+        "GIT_CONFIG_KEY_2": "protocol.version",
+        "GIT_CONFIG_VALUE_2": "2",
         # 認証に失敗したときに対話プロンプトで固まらないようにする。
         "GIT_TERMINAL_PROMPT": "0",
     })
@@ -160,12 +165,13 @@ def _git_env() -> dict[str, str]:
 
 
 def _codex_env() -> dict[str, str]:
-    """codex には GitHub の認証情報を渡さない (レビューに必要ないため)。"""
+    """codex には GitHub / GitLab の認証情報を渡さない (レビューに必要ないため)。"""
     env = dict(os.environ)
     for name in (
         "GH_TOKEN",
         "GITHUB_TOKEN",
-        "REVIEW_GH_TOKEN",
+        "GITLAB_TOKEN",
+        "REVIEW_GIT_TOKEN",
         # 廃止済みだが、古い設定で環境に残っていても codex には渡さない。
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_APP_PRIVATE_KEY_PATH",
@@ -266,9 +272,9 @@ def _tail(path: Path, limit: int = 2000) -> str:
 
 def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
     """リポジトリをクローン/更新し、作業ツリーをクリーンにして返す。"""
-    config.WORK_PATH.mkdir(parents=True, exist_ok=True)
-    repo_path = config.WORK_PATH / pr.repo
-    repo_url = f"https://github.com/{pr.owner}/{pr.repo}.git"
+    repo_path = config.repo_work_path(pr.owner, pr.repo)
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    repo_url = forge.get().clone_url(pr.owner, pr.repo)
 
     if not repo_path.exists():
         progress(f"リポジトリを初期化します: {repo_url}")
@@ -290,10 +296,10 @@ def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
 
     # remote が PR のリポジトリと一致するか検証。
     remote_url = _run([config.GIT_BIN, "remote", "get-url", "origin"], cwd=repo_path)
-    m = _REMOTE_RE.match(remote_url)
-    if not m:
+    parsed = forge.get().parse_remote_url(remote_url)
+    if parsed is None:
         raise ReviewError(f"未対応の remote URL 形式です: {remote_url}")
-    remote_repo = f"{m.group(1)}/{m.group(2)}"
+    remote_repo = "/".join(parsed)
     if remote_repo != f"{pr.owner}/{pr.repo}":
         raise ReviewError(
             f"remote リポジトリ ({remote_repo}) が PR ({pr.owner}/{pr.repo}) と一致しません。"
@@ -303,7 +309,7 @@ def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
 
 
 def _checkout_pr(
-    pr: ParsedPR, repo_path: Path, pull: github_api.PullRequest, progress: ProgressFn
+    pr: ParsedPR, repo_path: Path, pull: PullRequest, progress: ProgressFn
 ) -> None:
     """PR の base と head のコミットを取得し、head を checkout する。
 
@@ -319,7 +325,7 @@ def _checkout_pr(
     取得した時点から codex が `git diff` を終えるまで確実に残す。
     detached HEAD になるが `git diff <base>...HEAD` には支障ない。
     """
-    git_env = _git_env()
+    git_env = _git_env(pr)
 
     progress(f"PR #{pr.number} の base と head のコミットを取得します...")
     _run(
@@ -377,7 +383,7 @@ correctness verdict negative.
 """
 
 
-def _build_prompt(pull: github_api.PullRequest, include_quality: bool = False) -> str:
+def _build_prompt(pull: PullRequest, include_quality: bool = False) -> str:
     base_ref = pull.base_ref
     # base ブランチの先端ではなく PR の base コミットと比べる。三点ドットなので、
     # そこから枝分かれした地点 (merge-base) からの差分になる。
@@ -487,8 +493,8 @@ def run_review(
     _check_tools()
 
     progress(f"PR #{pr.number} の情報を取得します...")
-    pull = github_api.get_pull(github_auth.get_provider(), pr.owner, pr.repo, pr.number)
-    reviews.put_title(pr.repo, pr.number, pull.title)
+    pull = forge.get().get_pull(pr.owner, pr.repo, pr.number)
+    reviews.put_title(pr.owner, pr.repo, pr.number, pull.title)
 
     repo_path = _prepare_repo(pr, progress)
     _checkout_pr(pr, repo_path, pull, progress)
@@ -498,7 +504,7 @@ def run_review(
         progress("バグに加えて、書き方・品質の改善も指摘対象に含めます。")
     prompt = _build_prompt(pull, include_quality)
 
-    output_dir = config.LOGS_PATH / pr.repo
+    output_dir = config.repo_logs_path(pr.owner, pr.repo)
     output_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         dir=output_dir, prefix=f".codex_review_pr{pr.number}_err.", suffix=".tmp"
@@ -514,6 +520,7 @@ def run_review(
         raise
 
     review = reviews.create(
+        owner=pr.owner,
         repo=pr.repo,
         pr_number=pr.number,
         body=run.body,
@@ -540,12 +547,10 @@ def run_review(
 def post_review(
     pr: ParsedPR, review_id: int, progress: ProgressFn | None = None
 ) -> None:
-    """レビュー結果を PR にコメントとして投稿する。
+    """レビュー結果を PR に投稿する。
 
-    位置の読み取れた指摘はソース行へのコメントにし、残り (全体の要約や書式の
-    読めなかったぶん) をレビュー本体の本文にする。GitHub が位置を解決できないと
-    レビューごと 422 で弾かれるため、そのときは本文にまとめて投稿し直す。
-    指摘の内容はどちらの経路でも PR に残る。
+    投稿の形 (行コメントにするか、位置を解決できなかったときにどう投稿し直すか)
+    は forge が決める。どの経路でも指摘の内容は PR に残る。
 
     REST API でリポジトリを明示して投稿するため、作業ディレクトリの git 状態には
     依存しない (別のレビューが実行中でも安全に投稿できる)。レビュー完了から時間が
@@ -556,59 +561,10 @@ def post_review(
     if review is None:
         raise ReviewError(f"レビューが見つかりません: id={review_id}")
 
-    summary, found = findings.extract(review.body, config.WORK_PATH / pr.repo)
-    comments = [f.comment() for f in found]
-
-    if comments:
-        progress(
-            f"PR #{pr.number} にレビューを投稿します "
-            f"({len(comments)} 件をソース行へのコメントにします)..."
-        )
-        posted = _post_with_comments(
-            pr,
-            f"{reviews.header_line(review)}\n\n{summary}".rstrip(),
-            comments,
-            review.head_commit,
-        )
-        if posted:
-            progress("投稿が完了しました。")
-            return
-        progress("行コメントを解決できなかったため、本文にまとめて投稿し直します。")
-    else:
-        progress(f"PR #{pr.number} にレビューを投稿します...")
-
-    github_api.create_review(
-        github_auth.get_provider(),
-        pr.owner,
-        pr.repo,
-        pr.number,
-        reviews.render_body(review),
-        commit_id=review.head_commit,
+    # オーナーを 1 つに固定していた頃のレビューは、その頃の作業ツリーのパスで出ている。
+    roots = (
+        config.repo_work_path(pr.owner, pr.repo),
+        config.legacy_repo_work_path(pr.repo),
     )
+    forge.get().post_review(pr.owner, pr.repo, pr.number, review, roots, progress)
     progress("投稿が完了しました。")
-
-
-def _post_with_comments(
-    pr: ParsedPR, body: str, comments: list[dict], commit_id: str | None
-) -> bool:
-    """行コメント付きで投稿する。GitHub が位置を解決できなければ False を返す。
-
-    422 は差分に無いパスや行を指したときのもので (エラーは "Path could not be
-    resolved" など)、投稿はまるごと行われていない。本文だけならまだ通るので、
-    呼び出し元で投稿し直す。それ以外の失敗は投稿の失敗として伝える。
-    """
-    try:
-        github_api.create_review(
-            github_auth.get_provider(),
-            pr.owner,
-            pr.repo,
-            pr.number,
-            body,
-            comments=comments,
-            commit_id=commit_id,
-        )
-    except github_api.ApiError as e:
-        if e.status != 422:
-            raise
-        return False
-    return True

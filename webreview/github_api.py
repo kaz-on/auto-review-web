@@ -14,11 +14,11 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from . import config
 from .errors import ReviewError
+from .forge import PullRequest
 
 # 明示しないと GitHub 側の既定バージョンが使われ、将来の既定変更で挙動が変わるため固定する。
 _API_VERSION = "2022-11-28"
@@ -37,20 +37,6 @@ class ApiError(ReviewError):
     def __init__(self, message: str, status: int | None = None):
         super().__init__(message)
         self.status = status
-
-
-@dataclass
-class PullRequest:
-    base_ref: str
-    base_sha: str
-    head_sha: str
-    title: str
-    body: str
-    # 集計用。レビューの実行には使わないので、取れなくても止めない。
-    author: str = ""
-    additions: int | None = None
-    deletions: int | None = None
-    changed_files: int | None = None
 
 
 def api_request(
@@ -191,4 +177,22 @@ def create_review(
         payload["comments"] = comments
     _request_with_token(
         provider, "POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", payload
+    )
+
+
+def create_issue_comment(
+    provider: TokenProvider,
+    owner: str,
+    repo: str,
+    number: int,
+    body: str,
+) -> None:
+    """PR にコメントを 1 件投稿する (PR は issue でもあるので issues の API で書ける)。
+
+    レビュー API (pulls/{n}/reviews) を持たない GitHub 互換のサービス向け。
+    行コメントは付けられない。
+    """
+    _request_with_token(
+        provider, "POST", f"/repos/{owner}/{repo}/issues/{number}/comments",
+        {"body": body},
     )

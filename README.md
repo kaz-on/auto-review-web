@@ -4,7 +4,7 @@ LAN 内の PC からブラウザで使える、[Codex CLI](https://github.com/op
 
 Codex の実行には OpenAI の API キーが必要で、レビューのたびに API 料金がかかる。
 
-レビューの対象は GitHub（github.com）のプルリクエストだけ。GitLab などほかのサービスや GitHub Enterprise Server のリポジトリ、PR になっていないブランチやコミットはレビューできない。
+レビューの対象は、GitHub（github.com）のプルリクエスト、GitHub 互換の REST API を持つセルフホストのサービスのプルリクエスト（下記「GitHub 互換のサービス」）、GitLab のマージリクエスト（下記「GitLab」）。1 つのインスタンスで扱えるのはこのうち 1 つのサービスだけ。PR / MR になっていないブランチやコミットはレビューできない。GitHub Enterprise Server は互換のサービスと同じ設定で動く見込みだが、確かめていない。
 
 このアプリケーションは Claude Code を利用して作成されている。
 
@@ -16,6 +16,7 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 - レビュー完了後に **自動的に PR へ投稿** できる（既定でON。フォームのチェックで切替可）。
 - バグだけでなく **書き方・品質の改善** も指摘対象に含められる（既定でON。フォームのチェックで切替可。下記「品質改善の指摘」）。
 - 指摘は **ソース行へのコメント** として投稿する（位置を読み取れなかったぶんは本文にまとめる）。
+- 投稿する本文の中のファイルの参照（指摘のパスや `AGENTS.md` への相対リンク）は、レビューしたコミットのファイルへのリンクにする。
 - 自動投稿をOFFにした場合や自動投稿に失敗した場合は、ボタンから手動で投稿できる。
 - 終了したレビューは履歴から削除して一覧を整理できる（ログファイルは残る）。
 - 一覧には直近 20 件を表示し、「さらに表示」で古いものを読み込める。終了から 30 日を過ぎたジョブは履歴から自動で削除する（`REVIEW_JOB_RETENTION_DAYS`）。失敗したジョブと未投稿のレビューは、同じ PR をやり直さない限り残す。どちらの削除でもレビュー本体は消えず、集計タブから見られる。
@@ -29,16 +30,27 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 - 信頼できる LAN 内だけで使い、インターネットには公開しない。外から使う場合は、認証付きのリバースプロキシや VPN の後ろに置く。
 - 既定では実行している PC 自身（`127.0.0.1`）からしか接続できない。LAN 内のほかの PC から使う場合は `REVIEW_HOST=0.0.0.0` にする（docker compose でもホストで直接起動する場合でも同じ）。
-- レビューできるのは `REVIEW_OWNER` のリポジトリへの PR に限られる。ただし codex は PR のコードや説明文を読むので、fork から出された PR のように信頼できない人が書いた内容は、レビュー結果に影響しうる（プロンプトインジェクション）。PR が `AGENTS.md` を書き換えた場合も同様（下記「プロジェクト固有のレビュー観点」）。codex は read-only のサンドボックスで動かしており、作業ツリーを書き換えることはない。
+- レビューできるのは `REVIEW_OWNER` に書いたオーナーのリポジトリへの PR に限られる（カンマ区切りで複数書ける。「すべて許可」の指定はない）。ただし codex は PR のコードや説明文を読むので、fork から出された PR のように信頼できない人が書いた内容は、レビュー結果に影響しうる（プロンプトインジェクション）。PR が `AGENTS.md` を書き換えた場合も同様（下記「プロジェクト固有のレビュー観点」）。codex は read-only のサンドボックスで動かしており、作業ツリーを書き換えることはない。
 
 ## 動作要件
 
 - **Docker で起動する場合（推奨）**: Docker / Docker Compose のみ。`git` / `codex` はイメージに含まれる。
 - **ホストで直接起動する場合**: Python 3.10 以上、および `git` / `codex` が導入済みであること。
 
+## PR をホストするサービス
+
+`REVIEW_FORGE` で、レビューする PR / MR のあるサービスを選ぶ。1 つのインスタンスで扱えるのはどちらか一方だけ。
+
+| `REVIEW_FORGE` | 対象 | 設定する環境変数 |
+| --- | --- | --- |
+| `github`（既定） | github.com と、GitHub 互換の REST API を持つサービス | `GITHUB_*` / `GH_TOKEN`（下記「GitHub 認証」「GitHub 互換のサービス」） |
+| `gitlab` | GitLab（CE を含むセルフホスト） | `GITLAB_*`（下記「GitLab」） |
+
+選ばなかったほうの環境変数は使わないので、空のままでよい。
+
 ## GitHub 認証
 
-`GITHUB_AUTH_MODE` で 2 方式を選べる。
+`REVIEW_FORGE=github`（既定）のときに使う。`GITHUB_AUTH_MODE` で 2 方式を選べる。
 
 ### `pat`（既定）
 
@@ -46,18 +58,59 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 ### `app`
 
-GitHub App の秘密鍵から installation access token を都度発行する。App には **Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、`REVIEW_OWNER` のアカウント（Organization または個人アカウント）にインストールしておく。
+GitHub App の秘密鍵から installation access token を都度発行する。App には **Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、`REVIEW_OWNER` のアカウント（Organization または個人アカウント）にインストールしておく。`REVIEW_OWNER` に複数のオーナーを書いた場合は、そのすべてにインストールする。
 
 ```ini
 GITHUB_AUTH_MODE=app
 GITHUB_APP_CLIENT_ID=Iv23li...              # App の Client ID（App ID でも可）
 GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem
-GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決
+GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決（オーナーが複数なら省略する）
 ```
 
 秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを `/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。
 
+installation はオーナーごとに分かれているので、トークンもオーナーごとに発行する。`GITHUB_APP_INSTALLATION_ID` を指定できるのはオーナーが 1 つのときだけで、複数のときは省略してオーナーごとに自動で解決させる。
+
 installation access token は GitHub にアクセスする直前に取得し、失効が近ければ再発行するので、常駐させていても切れない。トークンの受け渡しの仕組みは [docs/design.md](docs/design.md#github-トークンの扱い) を参照。
+
+## GitHub 互換のサービス
+
+`REVIEW_FORGE=github`（既定）のまま、以下を設定する。
+
+GitHub と同じ形の REST API を持つセルフホストのサービスも、設定を合わせればレビューできる。1 つのインスタンスで扱えるのは 1 つのサービスだけで、github.com と混ぜては使えない。
+
+```ini
+GITHUB_WEB_URL=http://git.example.local:8888        # PR の URL はこの下の /<owner>/<repo>/pull/<番号>
+GITHUB_API_URL=http://git.example.local:8888/api/v3
+GITHUB_CLONE_URL={web}/git/{owner}/{repo}.git        # サービスの clone URL の形
+GITHUB_GIT_USERNAME=review-bot                       # トークンの持ち主のアカウント名
+GITHUB_POST_MODE=issue_comment                       # レビュー API が無ければ issue_comment
+GH_TOKEN=...                                         # 読み取りと PR へのコメントができるトークン
+```
+
+- **認証**: `pat` モード（`GH_TOKEN`）だけ使える。public のリポジトリでも、PR への投稿にはトークンが要る。
+- **git の認証**: github.com はユーザー名が `x-access-token` 固定で通るが、トークンの持ち主のアカウント名でないと通らないサービスがある。そのときは `GITHUB_GIT_USERNAME` にその名前を書く。
+- **投稿**: `pulls/{n}/reviews`（レビュー API）を持たないサービスでは `GITHUB_POST_MODE=issue_comment` にする。指摘をソース行へのコメントにはせず、本文全体を 1 件のコメント（`issues/{n}/comments`）として投稿する。
+- **必要な API**: `GET /repos/{owner}/{repo}/pulls/{n}` が `base.sha` / `head.sha` / `base.ref` を返すこと。マージしたあとも `base.sha` が PR の元の base のまま変わらないこと（変わると差分が空になる。[docs/design.md](docs/design.md#レビュー対象のコミット)）。
+- **git**: SHA を指定した fetch に応じること。プロトコル v2 でしか応じないサービスがあるので、アプリは fetch をプロトコル v2 に固定している。
+
+## GitLab
+
+GitLab（CE を含むセルフホストの GitLab）のマージリクエストをレビューするときは、`REVIEW_FORGE=gitlab` にする。GitHub の設定（`GITHUB_*` / `GH_TOKEN`）は使わない。
+
+```ini
+REVIEW_FORGE=gitlab
+GITLAB_URL=https://gitlab.example.com     # MR の URL はこの下の /<group>/<project>/-/merge_requests/<番号>
+GITLAB_TOKEN=glpat-...
+REVIEW_OWNER=my-group                      # グループのパス。サブグループも含む
+```
+
+- **トークン**: レビュー対象がすべて 1 つのトップレベルのグループ（とそのサブグループ）にあるなら、そのグループの**グループアクセストークン**を使う。ロールは **Reporter**、スコープは **`api` と `read_repository`**。投稿はトークンのボットの名前で行われる。複数のトップレベルのグループを `REVIEW_OWNER` に並べる場合は、それらすべてに Reporter で参加させた専用ユーザーのパーソナルアクセストークンを使う（アプリが持てるトークンは 1 つだけのため）。
+- **トークンの更新**: GitLab のトークンには有効期限がある。更新は「失効させて作り直す」ではなくローテーションで行う（グループアクセストークンを失効させるとボットのユーザーが消え、過去の投稿の名前が「Ghost User」になる）。トークンは起動時に読むので、更新したら再起動する。
+- **オーナー**: `REVIEW_OWNER` にはグループのパスを書く。そのグループの下のサブグループも許可する（`my-group` を書けば `my-group/sub/project` も通る）。サブグループだけを許可するときは `my-group/sub` と書く。
+- **投稿**: 指摘をソース行へのコメントにはせず、本文全体を MR へのコメント 1 件として投稿する。GitLab は単独の改行を改行として表示しないので、投稿するときだけ改行を明示する（DB の本文は変えない）。
+- **MR を作った直後**: GitLab が MR の差分を計算し終えるまではレビュー対象のコミットが分からないので、数秒待って取り直す。それでも取れなければエラーになるので、少し待ってからやり直す。
+- **変更の規模**: GitLab の API は追加・削除の行数を返さないので、集計の `pr_additions` / `pr_deletions` は空欄になる。`pr_changed_files` は入る（1000 件を超えると空欄）。
 
 ## Codex 認証
 
@@ -74,13 +127,13 @@ installation access token は GitHub にアクセスする直前に取得し、�
 
 ```bash
 cp .env.example .env
-# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*）、Codex 認証（CODEX_API_KEY もしくは CODEX_ACCESS_TOKEN）、REVIEW_OWNER を設定する
+# .env に GitHub 認証（GH_TOKEN もしくは GITHUB_APP_*。GitLab なら REVIEW_FORGE と GITLAB_*）、Codex 認証（CODEX_API_KEY もしくは CODEX_ACCESS_TOKEN）、REVIEW_OWNER を設定する
 docker compose up -d --build
 ```
 
 起動後、ブラウザから `http://localhost:8080/` でアクセスする。LAN 内のほかの PC から使う場合は、`.env` に `REVIEW_HOST=0.0.0.0` を設定して `http://<実行PCのIP>:8080/` でアクセスする（上記「セキュリティ上の注意」）。
 
-- 認証: 上記「GitHub 認証」「Codex 認証」の設定。いずれも `.env` から環境変数として渡す。
+- 認証: 上記「GitHub 認証」（GitLab なら「GitLab」）と「Codex 認証」の設定。いずれも `.env` から環境変数として渡す。
 - 永続化: git リポジトリ（`review_repos`）と、DB・codex の生ログ（`review_logs`）は named volume。ジョブ履歴・レビュー本文・PR タイトルはすべて DB に入る。
 - 停止 / ログ確認:
 
@@ -132,7 +185,27 @@ python3 -m venv .venv
 .venv/bin/python -m webreview
 ```
 
+## レビュー対象のオーナー（`REVIEW_OWNER`）
+
+`REVIEW_OWNER` にはレビューを許可するオーナーを書く。GitHub では Organization 名または個人アカウント名、GitLab ではグループのパス。`REVIEW_OWNER=team-a,team-b` のようにカンマ区切りで複数書ける。オーナー名は完全一致で照合する（大文字小文字も区別する）。ただし GitLab では、書いたグループの下のサブグループも許可する（上記「GitLab」）。
+
+認証の仕組みがないこのツールでは、オーナーの制約がレビュー・投稿できる範囲を絞る唯一の関門なので、「すべて許可」の指定は設けていない。空のままならすべて拒否する。
+
+オーナーが違えば同じ名前のリポジトリも別のものとして扱う。画面と集計では `owner/repo` の形で表示する。
+
+オーナーを 1 つしか書けなかった版から更新すると、初回の起動時に DB をオーナー付きの形へ移行する。既存のレビューのオーナーは、そのレビューを実行したジョブから埋める。ジョブが消えていれば `REVIEW_OWNER` の先頭のオーナーで埋めるので、**オーナーを増やす前に、いったん今の設定のまま更新して起動する**。
+
 ## 設定（環境変数で上書き可能）
+
+Codex の認証（`CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`）は上記「Codex 認証」を参照。
+
+### サービスの選択
+
+| 環境変数 | 既定値 | 説明 |
+| --- | --- | --- |
+| `REVIEW_FORGE` | `github` | PR をホストするサービス（`github` = github.com と GitHub 互換のサービス / `gitlab` = GitLab） |
+
+### GitHub（`REVIEW_FORGE=github`）
 
 | 環境変数 | 既定値 | 説明 |
 | --- | --- | --- |
@@ -140,16 +213,37 @@ python3 -m venv .venv
 | `GH_TOKEN` | （空） | `pat` モードの Personal Access Token |
 | `GITHUB_APP_CLIENT_ID` | （空） | `app` モードの Client ID（App ID も可） |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
-| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決 |
+| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決。オーナーが複数なら指定できない |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
-| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。通常は変更不要（PR や clone の URL は github.com 固定のため、変えても GitHub Enterprise Server には対応しない） |
-| `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名） |
+| `GITHUB_WEB_URL` | `https://github.com` | PR をホストするサービスの URL（上記「GitHub 互換のサービス」）。github.com なら変更不要 |
+| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。github.com なら変更不要 |
+| `GITHUB_CLONE_URL` | `{web}/{owner}/{repo}.git` | clone URL の形。`{web}` は `GITHUB_WEB_URL` に置き換わる |
+| `GITHUB_GIT_USERNAME` | `x-access-token` | git の認証に使うユーザー名 |
+| `GITHUB_POST_MODE` | `review` | 投稿の方法（`review` = レビュー API で行コメント付き / `issue_comment` = 本文全体を 1 件のコメント） |
+
+### GitLab（`REVIEW_FORGE=gitlab`）
+
+| 環境変数 | 既定値 | 説明 |
+| --- | --- | --- |
+| `GITLAB_URL` | （空） | `gitlab` のときの GitLab の URL |
+| `GITLAB_TOKEN` | （空） | `gitlab` のときのアクセストークン（上記「GitLab」） |
+
+### レビュー
+
+| 環境変数 | 既定値 | 説明 |
+| --- | --- | --- |
+| `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（GitHub は Organization 名または個人アカウント名、GitLab はグループのパス）。カンマ区切りで複数指定できる（上記「レビュー対象のオーナー」） |
 | `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |
 | `REVIEW_STDERR_RETENTION_DAYS` | `30` | codex 生ログの保持日数。`0` で削除しない |
 | `REVIEW_JOB_RETENTION_DAYS` | `30` | 終了したジョブを一覧から自動削除するまでの日数。失敗・未投稿のものは残す。`0` で削除しない |
+
+### 保存先・サーバ・外部コマンド
+
+| 環境変数 | 既定値 | 説明 |
+| --- | --- | --- |
 | `REVIEW_WORK_PATH` | `data/work` | リポジトリの作業ディレクトリ |
 | `REVIEW_LOGS_PATH` | `data/review_logs` | codex の生ログのルート |
 | `REVIEW_DB_PATH` | `data/review.db` | SQLite データベースの位置 |
@@ -187,11 +281,11 @@ REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実�
 | `GET /api/reviews/<id>` | ジョブ詳細（レビュー本文を含む） |
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |
-| `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない |
+| `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない。`repo` は `owner/repo` の形（リポジトリ名だけならオーナーを問わず絞り込む） |
 | `GET /api/summary/<id>` | レビュー本文と詳細情報 |
 | `GET /api/export/reviews.csv` | レビュー単位の CSV（`repo` / `q` で絞り込み。下記「CSV エクスポート」） |
 | `GET /api/export/findings.csv` | 指摘単位の CSV（同上） |
-| `GET /api/config` | オーナー / モデル名 / reasoning effort / 説明文 |
+| `GET /api/config` | オーナー / PR の URL の形 / モデル名 / reasoning effort / 説明文 |
 
 ### CI からの投入
 

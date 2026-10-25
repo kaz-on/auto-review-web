@@ -18,20 +18,22 @@ pytestmark = pytest.mark.usefixtures("temp_db", "temp_paths", "review_owner")
 BODY = """\
 要約。
 
-- [P1] 合計を誤る — {work}/my-repo/a.py:3-4
+- [P1] 合計を誤る — {root}/a.py:3-4
   説明 1 行目。
   説明 2 行目。
-- [P2] 閉じ忘れ — {work}/my-repo/b.py:7
-- [P1] 二件目 — {work}/my-repo/a.py:9
+- [P2] 閉じ忘れ — {root}/b.py:7
+- [P1] 二件目 — {root}/a.py:9
 - 位置の無い箇条書き
 """
 
 
 def _create(work, pr_number: int = 1, body: str | None = None, **kw):
     kw.setdefault("created_at", 1_700_000_000.0 + pr_number)
+    kw.setdefault("owner", "example-org")
     return reviews.create(
         repo="my-repo", pr_number=pr_number,
-        body=BODY.format(work=work) if body is None else body, **kw,
+        body=BODY.format(root=work / "example-org" / "my-repo") if body is None else body,
+        **kw,
     )
 
 
@@ -46,6 +48,7 @@ def test_レビュー単位では優先度ごとに指摘を数える(temp_paths
 
     [row] = _as_dicts(export.REVIEW_COLUMNS, export.review_rows())
 
+    assert (row["owner"], row["repo"]) == ("example-org", "my-repo")
     assert row["pr_author"] == "alice"
     assert row["pr_url"] == "https://github.com/example-org/my-repo/pull/1"
     assert row["created_at"] == "2023-11-14T22:13:21Z"
@@ -57,7 +60,7 @@ def test_レビュー単位では優先度ごとに指摘を数える(temp_paths
 
 def test_優先度の無い指摘はその他に数える(temp_paths):
     work, _ = temp_paths
-    _create(work, body=f"- 優先度なし — {work}/my-repo/a.py:1\n- [p0] 小文字 — a.py:2\n")
+    _create(work, body=f"- 優先度なし — {work}/example-org/my-repo/a.py:1\n- [p0] 小文字 — a.py:2\n")
 
     [row] = _as_dicts(export.REVIEW_COLUMNS, export.review_rows())
 
@@ -79,11 +82,14 @@ def test_同じ_pr_の最新の_rev_だけに印を付ける(temp_paths):
     _create(work, pr_number=1)
     _create(work, pr_number=1)
     _create(work, pr_number=2)
+    # オーナーが違えば別の PR なので、こちらの rev とは比べない。
+    _create(work, pr_number=1, owner="other-org", created_at=1_700_000_010.0)
 
     rows = _as_dicts(export.REVIEW_COLUMNS, export.review_rows())
 
-    assert [(r["pr_number"], r["rev"], r["is_latest_rev"]) for r in rows] == [
-        (1, 0, 0), (1, 1, 1), (2, 0, 1),
+    assert [(r["owner"], r["pr_number"], r["rev"], r["is_latest_rev"]) for r in rows] == [
+        ("example-org", 1, 0, 0), ("example-org", 1, 1, 1), ("example-org", 2, 0, 1),
+        ("other-org", 1, 0, 1),
     ]
 
 
@@ -91,26 +97,40 @@ def test_古い順に並べ集計タブと同じ条件で絞り込める(temp_pa
     work, _ = temp_paths
     _create(work, pr_number=2)
     _create(work, pr_number=1)
-    reviews.create(repo="other", pr_number=3, body="injection の指摘")
+    reviews.create(owner="example-org", repo="other", pr_number=3, body="injection の指摘")
 
-    assert [r[2] for r in export.review_rows()] == [1, 2, 3]
-    assert [r[2] for r in export.review_rows(repo="my-repo")] == [1, 2]
-    assert [r[2] for r in export.review_rows(q="injection")] == [3]
+    def numbers(rows):
+        return [r["pr_number"] for r in _as_dicts(export.REVIEW_COLUMNS, rows)]
+
+    assert numbers(export.review_rows()) == [1, 2, 3]
+    assert numbers(export.review_rows(repo="example-org/my-repo")) == [1, 2]
+    assert numbers(export.review_rows(q="injection")) == [3]
 
 
 def test_指摘単位ではパスをリポジトリからの相対にする(temp_paths):
     work, _ = temp_paths
     _create(work, pr_author="alice")
-    reviews.put_title("my-repo", 1, "タイトル")
+    reviews.put_title("example-org", "my-repo", 1, "タイトル")
 
     rows = _as_dicts(export.FINDING_COLUMNS, export.finding_rows())
 
     assert [(r["priority"], r["path"], r["start_line"], r["end_line"]) for r in rows] == [
         ("P1", "a.py", 3, 4), ("P2", "b.py", 7, 7), ("P1", "a.py", 9, 9),
     ]
+    assert (rows[0]["owner"], rows[0]["repo"]) == ("example-org", "my-repo")
     assert rows[0]["pr_author"] == "alice"
     assert rows[0]["title"] == "合計を誤る"
     assert rows[0]["description"] == "説明 1 行目。\n説明 2 行目。"
+
+
+def test_オーナーを固定していた頃の作業ツリーのパスも相対にする(temp_paths):
+    """当時は REVIEW_WORK_PATH/<repo> で codex が動いていた。"""
+    work, _ = temp_paths
+    _create(work, body=BODY.format(root=work / "my-repo"))
+
+    rows = _as_dicts(export.FINDING_COLUMNS, export.finding_rows())
+
+    assert [r["path"] for r in rows] == ["a.py", "b.py", "a.py"]
 
 
 def test_リポジトリの外を指すパスは出力されたまま残す(temp_paths):

@@ -150,8 +150,13 @@ fetchJSON("/api/config").then((/** @type {ConfigResponse} */ cfg) => {
     ? `${cfg.model}（reasoning: ${cfg.reasoning_effort}）`
     : cfg.model;
   const meta = /** @type {HTMLElement} */ (document.getElementById("config-meta"));
-  meta.textContent = `対象: ${cfg.owner} / モデル: ${model}`;
+  meta.textContent = `対象: ${cfg.owners.join(", ")} / モデル: ${model}`;
   renderDescription(cfg.description);
+  // 既定 (index.html) は github.com の形。互換のサービスではそのホストの形に差し替える。
+  if (cfg.pr_url_pattern) {
+    const input = /** @type {HTMLInputElement} */ (document.getElementById("pr-url"));
+    input.placeholder = cfg.pr_url_pattern;
+  }
 }).catch(() => {});
 
 // ---- レビュー投入フォーム --------------------------------------------------
@@ -332,7 +337,9 @@ function updateCard(card, job) {
 
   // タイトル (リンク)
   r.title.textContent = "";
-  const label = `${job.repo} #${job.number}` + (job.pr_title ? ` — ${job.pr_title}` : "");
+  // オーナーが違えば同じ名前のリポジトリもありうるので、オーナーから書く。
+  const label = `${job.owner}/${job.repo} #${job.number}`
+    + (job.pr_title ? ` — ${job.pr_title}` : "");
   r.title.appendChild(el("a", {
     href: job.url, text: label,
     attrs: { target: "_blank", rel: "noopener" },
@@ -674,7 +681,8 @@ function renderSummary(entries) {
   for (const e of entries) {
     const heading = el("h3", {}, [
       el("a", {
-        href: e.url, text: `${e.repo} #${e.pr_num}` + (e.title ? ` — ${e.title}` : ""),
+        href: e.url,
+        text: `${e.owner}/${e.repo} #${e.pr_num}` + (e.title ? ` — ${e.title}` : ""),
         attrs: { target: "_blank", rel: "noopener" },
       }),
     ]);
