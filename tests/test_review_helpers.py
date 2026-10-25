@@ -197,7 +197,7 @@ def test_モデル表記に推論の深さを併記する(monkeypatch):
 
 # --- 環境変数 ----------------------------------------------------------------
 def test_codex_には_github_の認証情報を渡さない(monkeypatch):
-    for name in ("GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GH_TOKEN",
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GIT_TOKEN",
                  "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_PATH"):
         monkeypatch.setenv(name, "secret")
     monkeypatch.setenv("PATH", os.environ["PATH"])
@@ -205,7 +205,7 @@ def test_codex_には_github_の認証情報を渡さない(monkeypatch):
     env = review._codex_env()
 
     assert not any(name in env for name in (
-        "GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GH_TOKEN",
+        "GH_TOKEN", "GITHUB_TOKEN", "REVIEW_GIT_TOKEN",
         "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_PRIVATE_KEY_PATH",
     ))
     assert "PATH" in env
@@ -218,13 +218,17 @@ def test_git_にはトークンを環境変数の_credential_helper_で渡す(mo
 
     monkeypatch.setattr(github_auth, "get_provider", lambda: Provider())
 
-    env = review._git_env()
+    env = review._git_env(ParsedPR(owner="example-org", repo="my-repo", number=1))
 
-    assert env["REVIEW_GH_TOKEN"] == "gh-token"
-    # 既存の helper を空値で打ち消してから自前を差し込む。
+    assert env["REVIEW_GIT_USERNAME"] == "x-access-token"
+    assert env["REVIEW_GIT_TOKEN"] == "gh-token"
+    # 既存の helper を空値で打ち消してから自前を差し込む。helper は PR のホストに限る。
     assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.https://github.com.helper"
     assert env["GIT_CONFIG_VALUE_0"] == ""
-    assert "REVIEW_GH_TOKEN" in env["GIT_CONFIG_VALUE_1"]
+    assert env["GIT_CONFIG_KEY_1"] == "credential.https://github.com.helper"
+    assert "REVIEW_GIT_USERNAME" in env["GIT_CONFIG_VALUE_1"]
+    assert "REVIEW_GIT_TOKEN" in env["GIT_CONFIG_VALUE_1"]
     assert env["GIT_TERMINAL_PROMPT"] == "0"
 
 

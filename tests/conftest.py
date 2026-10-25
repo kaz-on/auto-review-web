@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from webreview import config, db, github_auth
+from webreview import config, db, forge, github_auth
 
 
 def _reset_db_connections() -> None:
@@ -71,6 +71,14 @@ def reset_auth_provider():
     github_auth._PROVIDER = None
     yield
     github_auth._PROVIDER = None
+
+
+@pytest.fixture(autouse=True)
+def reset_forge():
+    """forge は設定から 1 度だけ組み立てるので、テストで設定を変えたら作り直させる。"""
+    forge._FORGE = None
+    yield
+    forge._FORGE = None
 
 
 @pytest.fixture

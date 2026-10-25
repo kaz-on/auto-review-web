@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import config, db, github_api, github_auth
+from . import config, db, forge
 from .errors import ReviewError
 
 # PR タイトルの再取得間隔。PR 名は変更されうるので恒久キャッシュにはしない。
@@ -193,8 +193,7 @@ def list_summary(
             "pr_num": row["pr_number"],
             "rev": row["rev"],
             "created_at": row["created_at"],
-            "url": f"https://github.com/{config.REVIEW_OWNER}/{row['repo']}"
-                   f"/pull/{row['pr_number']}",
+            "url": forge.get().pr_url(config.REVIEW_OWNER, row["repo"], row["pr_number"]),
             "title": row["title"] or "",
             "model": row["model"],
             "reasoning_effort": row["reasoning_effort"],
@@ -283,7 +282,7 @@ def put_title(repo: str, pr_number: int, title: str) -> None:
 def refresh_titles_async(limit: int = 20) -> None:
     """タイトルの取り直しをバックグラウンドで走らせる。
 
-    GitHub API は 1 件ずつ順に叩くため、集計リクエストの中で待つと表示が数秒
+    API は 1 件ずつ順に叩くため、集計リクエストの中で待つと表示が数秒
     止まりうる。取得できなかったぶんは前回の値のまま表示し、次に開いたときに
     反映されればよい。多重起動は避ける (集計は連続で開かれることがある)。
     """
@@ -305,7 +304,7 @@ def refresh_titles_async(limit: int = 20) -> None:
 
 
 def refresh_titles(limit: int = 20) -> int:
-    """タイトル未取得・失効ぶんを GitHub から取り直す。取得できた件数を返す。
+    """タイトル未取得・失効ぶんを PR のホストから取り直す。取得できた件数を返す。
 
     1 回あたりの取得数に上限を設ける。認証未設定や削除された PR で失敗しても
     集計自体は成立させる。
@@ -322,11 +321,8 @@ def refresh_titles(limit: int = 20) -> int:
     fetched = 0
     for row in rows:
         try:
-            pull = github_api.get_pull(
-                github_auth.get_provider(),
-                config.REVIEW_OWNER,
-                row["repo"],
-                row["pr_number"],
+            pull = forge.get().get_pull(
+                config.REVIEW_OWNER, row["repo"], row["pr_number"]
             )
         except ReviewError:
             continue

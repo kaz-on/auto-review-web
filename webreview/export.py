@@ -16,7 +16,7 @@ from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config, db, findings, reviews
+from . import config, db, findings, forge, reviews
 
 REVIEW_COLUMNS = [
     "review_id", "repo", "pr_number", "pr_url", "pr_title", "pr_author",
@@ -74,7 +74,7 @@ def review_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[
                 other += 1
         yield [
             row["id"], row["repo"], row["pr_number"],
-            f"https://github.com/{config.REVIEW_OWNER}/{row['repo']}/pull/{row['pr_number']}",
+            forge.get().pr_url(config.REVIEW_OWNER, row["repo"], row["pr_number"]),
             row["title"], row["pr_author"], row["rev"], row["is_latest_rev"],
             _iso(row["created_at"]), row["model"], row["reasoning_effort"],
             row["include_quality"], row["pr_additions"], row["pr_deletions"],
