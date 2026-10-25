@@ -90,13 +90,17 @@ def parse_pr_url(pr_url: str) -> ParsedPR:
         raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
 
     owner, repo, number = parsed
-    if not config.REVIEW_OWNER:
+    # オーナーとリポジトリ名はそのまま作業ディレクトリのパスになる。
+    if {owner, repo} & {".", ".."}:
+        raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
+    if not config.REVIEW_OWNERS:
         raise ReviewError(
             "REVIEW_OWNER が設定されていません。管理者に連絡してください。"
         )
-    if owner != config.REVIEW_OWNER:
+    if owner not in config.REVIEW_OWNERS:
         raise ReviewError(
-            f"リポジトリのオーナー ({owner}) が {config.REVIEW_OWNER} ではありません。"
+            f"リポジトリのオーナー ({owner}) が "
+            f"{', '.join(config.REVIEW_OWNERS)} のいずれでもありません。"
         )
     return ParsedPR(owner=owner, repo=repo, number=number)
 
@@ -260,8 +264,8 @@ def _tail(path: Path, limit: int = 2000) -> str:
 
 def _prepare_repo(pr: ParsedPR, progress: ProgressFn) -> Path:
     """リポジトリをクローン/更新し、作業ツリーをクリーンにして返す。"""
-    config.WORK_PATH.mkdir(parents=True, exist_ok=True)
-    repo_path = config.WORK_PATH / pr.repo
+    repo_path = config.repo_work_path(pr.owner, pr.repo)
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
     repo_url = forge.get().clone_url(pr.owner, pr.repo)
 
     if not repo_path.exists():
@@ -482,7 +486,7 @@ def run_review(
 
     progress(f"PR #{pr.number} の情報を取得します...")
     pull = forge.get().get_pull(pr.owner, pr.repo, pr.number)
-    reviews.put_title(pr.repo, pr.number, pull.title)
+    reviews.put_title(pr.owner, pr.repo, pr.number, pull.title)
 
     repo_path = _prepare_repo(pr, progress)
     _checkout_pr(pr, repo_path, pull, progress)
@@ -492,7 +496,7 @@ def run_review(
         progress("バグに加えて、書き方・品質の改善も指摘対象に含めます。")
     prompt = _build_prompt(pull, include_quality)
 
-    output_dir = config.LOGS_PATH / pr.repo
+    output_dir = config.repo_logs_path(pr.owner, pr.repo)
     output_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         dir=output_dir, prefix=f".codex_review_pr{pr.number}_err.", suffix=".tmp"
@@ -508,6 +512,7 @@ def run_review(
         raise
 
     review = reviews.create(
+        owner=pr.owner,
         repo=pr.repo,
         pr_number=pr.number,
         body=run.body,
@@ -548,7 +553,10 @@ def post_review(
     if review is None:
         raise ReviewError(f"レビューが見つかりません: id={review_id}")
 
-    forge.get().post_review(
-        pr.owner, pr.repo, pr.number, review, config.WORK_PATH / pr.repo, progress
+    # オーナーを 1 つに固定していた頃のレビューは、その頃の作業ツリーのパスで出ている。
+    roots = (
+        config.repo_work_path(pr.owner, pr.repo),
+        config.legacy_repo_work_path(pr.repo),
     )
+    forge.get().post_review(pr.owner, pr.repo, pr.number, review, roots, progress)
     progress("投稿が完了しました。")

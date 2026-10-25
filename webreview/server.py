@@ -40,8 +40,11 @@ def _check_review_owner() -> None:
     _check_github_auth と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
     に parse_pr_url が画面へエラーを出す。
     """
-    if config.REVIEW_OWNER:
-        print(f"[info] レビュー対象のオーナー: {config.REVIEW_OWNER}", flush=True)
+    if config.REVIEW_OWNERS:
+        print(
+            f"[info] レビュー対象のオーナー: {', '.join(config.REVIEW_OWNERS)}",
+            flush=True,
+        )
     else:
         print("[warn] REVIEW_OWNER が未設定です。レビューは実行できません。", flush=True)
 
@@ -53,7 +56,8 @@ def _check_github_auth() -> None:
     起動自体は続け、ジョブ実行時に画面へエラーを出す (UI には到達できた方が良い)。
     """
     try:
-        github_auth.get_provider()
+        for owner in config.REVIEW_OWNERS or ("",):
+            github_auth.get_provider(owner)
     except ReviewError as e:
         print(f"[warn] GitHub 認証の設定に問題があります: {e}", flush=True)
     else:
@@ -138,7 +142,7 @@ def create_app() -> Flask:
     @app.get("/api/config")
     def api_config():
         return jsonify({
-            "owner": config.REVIEW_OWNER,
+            "owners": list(config.REVIEW_OWNERS),
             "model": config.REVIEW_MODEL,
             "reasoning_effort": config.REVIEW_REASONING_EFFORT,
             "description": config.REVIEW_DESCRIPTION,

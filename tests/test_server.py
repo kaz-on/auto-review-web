@@ -94,11 +94,17 @@ def test_画面に必要な設定を返す(client, monkeypatch):
 
     data = client.get("/api/config").get_json()
 
-    assert data["owner"] == "example-org"
+    assert data["owners"] == ["example-org"]
     assert data["model"] == "gpt-6.1-sol"
     assert data["description"] == "説明文"
     # トークンや秘密鍵は返さない。
-    assert set(data) == {"owner", "model", "reasoning_effort", "description"}
+    assert set(data) == {"owners", "model", "reasoning_effort", "description"}
+
+
+def test_複数のオーナーは設定に書いた順で返す(client, monkeypatch):
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("team-b", "team-a"))
+
+    assert client.get("/api/config").get_json()["owners"] == ["team-b", "team-a"]
 
 
 # --- レビューの投入 ---------------------------------------------------------
@@ -135,7 +141,7 @@ def test_先行するジョブがあることを知らせる(client):
 
 
 def test_既定ではレビュー済みの_pr_も再レビューする(client, worker):
-    reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
 
     resp = _post_review(client)
 
@@ -145,7 +151,7 @@ def test_既定ではレビュー済みの_pr_も再レビューする(client, w
 
 
 def test_レビュー済みの_pr_は指定があれば投入しない(client, worker):
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
 
     resp = _post_review(client, skip_if_reviewed=True)
 
@@ -257,7 +263,7 @@ def test_全て終わっていれば実行中ではない(client):
 
 def test_詳細ではレビュー本文を返す(client):
     job_id = _post_review(client).get_json()["job"]["id"]
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘", model="m")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘", model="m")
     store.update(job_id, status=store.SUCCEEDED, review_id=review.id)
 
     data = client.get(f"/api/reviews/{job_id}").get_json()
@@ -277,7 +283,7 @@ def test_レビュー未生成なら本文は付かない(client):
 
 def test_レビューを消してもジョブ履歴は残る(client):
     job_id = _post_review(client).get_json()["job"]["id"]
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     store.update(job_id, status=store.SUCCEEDED, review_id=review.id)
 
     with db.write() as conn:
@@ -320,7 +326,7 @@ def test_存在しないジョブの削除は_404(client):
 
 def test_ジョブを消してもレビュー本体は残る(client):
     job_id = _post_review(client).get_json()["job"]["id"]
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     store.update(job_id, status=store.SUCCEEDED, review_id=review.id)
 
     client.delete(f"/api/reviews/{job_id}")
@@ -331,7 +337,7 @@ def test_ジョブを消してもレビュー本体は残る(client):
 # --- 投稿 -------------------------------------------------------------------
 def _succeeded_job(client) -> str:
     job_id = _post_review(client).get_json()["job"]["id"]
-    review = reviews.create(repo="my-repo", pr_number=1, body="## 指摘")
+    review = reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="## 指摘")
     store.update(job_id, status=store.SUCCEEDED, review_id=review.id)
     return job_id
 
@@ -396,34 +402,34 @@ def test_存在しないジョブの投稿は_404(client):
 
 # --- 集計 -------------------------------------------------------------------
 def test_集計一覧を返す(client):
-    reviews.create(repo="my-repo", pr_number=1, body="本文", created_at=100.0)
-    reviews.create(repo="other-repo", pr_number=2, body="本文", created_at=200.0)
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="本文", created_at=100.0)
+    reviews.create(owner="example-org", repo="other-repo", pr_number=2, body="本文", created_at=200.0)
 
     data = client.get("/api/summary").get_json()
 
     assert data["total"] == 2
     assert [e["pr_num"] for e in data["entries"]] == [2, 1]
-    assert data["repos"] == ["my-repo", "other-repo"]
+    assert data["repos"] == ["example-org/my-repo", "example-org/other-repo"]
     assert data["limit"] == reviews.DEFAULT_LIMIT
     assert data["offset"] == 0
 
 
 def test_集計を絞り込める(client):
-    reviews.create(repo="my-repo", pr_number=1, body="injection の懸念")
-    reviews.create(repo="other-repo", pr_number=2, body="命名の指摘")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="injection の懸念")
+    reviews.create(owner="example-org", repo="other-repo", pr_number=2, body="命名の指摘")
 
-    by_repo = client.get("/api/summary?repo=my-repo").get_json()
+    by_repo = client.get("/api/summary?repo=example-org/my-repo").get_json()
     assert by_repo["total"] == 1
 
     by_q = client.get("/api/summary?q=injection").get_json()
     assert by_q["total"] == 1
     # 絞り込んでも選択肢のリポジトリ一覧は減らさない。
-    assert by_q["repos"] == ["my-repo", "other-repo"]
+    assert by_q["repos"] == ["example-org/my-repo", "example-org/other-repo"]
 
 
 def test_集計をページングできる(client):
     for n in range(5):
-        reviews.create(repo="my-repo", pr_number=n, body="本文",
+        reviews.create(owner="example-org", repo="my-repo", pr_number=n, body="本文",
                        created_at=float(n) + 1)
 
     data = client.get("/api/summary?limit=2&offset=1").get_json()
@@ -441,14 +447,14 @@ def test_数値でないページング指定でも落ちない(client, query):
 
 
 def test_空の絞り込みは指定なしと同じ(client):
-    reviews.create(repo="my-repo", pr_number=1, body="本文")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="本文")
 
     assert client.get("/api/summary?repo=&q=%20").get_json()["total"] == 1
 
 
 def test_集計の詳細で本文を返す(client):
     review = reviews.create(
-        repo="my-repo", pr_number=1, body="## 指摘", model="m", details="バナー"
+        owner="example-org", repo="my-repo", pr_number=1, body="## 指摘", model="m", details="バナー"
     )
 
     data = client.get(f"/api/summary/{review.id}").get_json()
@@ -475,7 +481,7 @@ def test_集計を開いてもタイトル取得を待たない(
 
 # --- エクスポート -----------------------------------------------------------
 def test_レビュー単位の_csv_をダウンロードさせる(client):
-    reviews.create(repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
 
     resp = client.get("/api/export/reviews.csv")
 
@@ -483,17 +489,17 @@ def test_レビュー単位の_csv_をダウンロードさせる(client):
     assert resp.content_type == "text/csv; charset=utf-8"
     assert resp.headers["Content-Disposition"].startswith('attachment; filename="reviews-')
     lines = resp.get_data(as_text=True).removeprefix("\ufeff").splitlines()
-    assert lines[0].startswith("review_id,repo,pr_number,")
+    assert lines[0].startswith("review_id,owner,repo,pr_number,")
     assert len(lines) == 2
 
 
 def test_指摘単位の_csv_も集計タブと同じ条件で絞り込める(client):
-    reviews.create(repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
-    reviews.create(repo="other", pr_number=2, body="- [P2] u — b.py:1\n")
+    reviews.create(owner="example-org", repo="my-repo", pr_number=1, body="- [P1] t — a.py:1\n")
+    reviews.create(owner="example-org", repo="other", pr_number=2, body="- [P2] u — b.py:1\n")
 
-    resp = client.get("/api/export/findings.csv?repo=other")
+    resp = client.get("/api/export/findings.csv?repo=example-org/other")
 
     assert resp.headers["Content-Disposition"].startswith('attachment; filename="findings-')
     lines = resp.get_data(as_text=True).removeprefix("\ufeff").splitlines()
     assert len(lines) == 2
-    assert lines[1].split(",")[1] == "other"
+    assert lines[1].split(",")[1:3] == ["example-org", "other"]

@@ -68,9 +68,9 @@ def temp_paths(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_auth_provider():
     """プロセス全体で共有される TokenProvider がテスト間に漏れないようにする。"""
-    github_auth._PROVIDER = None
+    github_auth._PROVIDERS.clear()
     yield
-    github_auth._PROVIDER = None
+    github_auth._PROVIDERS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +84,7 @@ def reset_forge():
 @pytest.fixture
 def review_owner(monkeypatch):
     """レビュー対象のオーナーを固定する。"""
-    monkeypatch.setattr(config, "REVIEW_OWNER", "example-org")
+    monkeypatch.setattr(config, "REVIEW_OWNERS", ("example-org",))
     return "example-org"
 
 

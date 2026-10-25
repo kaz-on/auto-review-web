@@ -75,7 +75,8 @@ interface SkippedReviewResponse {
 
 /** GET /api/config。いずれも未設定なら空文字 (null にはならない)。 */
 interface ConfigResponse {
-  owner: string;
+  /** REVIEW_OWNER に書いた順。未設定なら空の配列。 */
+  owners: string[];
   model: string;
   reasoning_effort: string;
   description: string;
@@ -84,6 +85,7 @@ interface ConfigResponse {
 /** GET /api/summary の 1 件 (reviews.list_summary)。本文は含まない。 */
 interface SummaryEntry {
   id: number;
+  owner: string;
   repo: string;
   pr_num: number;
   rev: number;
@@ -103,6 +105,7 @@ interface SummaryResponse {
   total: number;
   limit: number;
   offset: number;
+  /** 絞り込みの選択肢。owner/repo の形で、そのまま repo パラメータに渡せる。 */
   repos: string[];
 }
 

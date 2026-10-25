@@ -16,8 +16,14 @@ from webreview.errors import ReviewError
 pytestmark = pytest.mark.usefixtures("temp_db")
 
 
-def _create(repo: str = "my-repo", pr_number: int = 1, body: str = "本文", **kw):
-    return reviews.create(repo=repo, pr_number=pr_number, body=body, **kw)
+def _create(
+    repo: str = "my-repo",
+    pr_number: int = 1,
+    body: str = "本文",
+    owner: str = "example-org",
+    **kw,
+):
+    return reviews.create(owner=owner, repo=repo, pr_number=pr_number, body=body, **kw)
 
 
 # --- 保存と採番 -------------------------------------------------------------
@@ -62,6 +68,8 @@ def test_rev_は同じ_pr_ごとに_0_から採番される():
     assert _create(pr_number=2).rev == 0
     # リポジトリが違っても独立。
     assert _create(repo="other-repo", pr_number=1).rev == 0
+    # 名前が同じでもオーナーが違えば別のリポジトリ。
+    assert _create(owner="other-org", pr_number=1).rev == 0
 
 
 def test_rev_を明示して保存できる():
@@ -133,12 +141,12 @@ def test_一覧は新しい順で本文を含まない():
     assert entries[1]["body_bytes"] == len(("あ" * 10).encode("utf-8"))
 
 
-def test_一覧の_url_は_review_owner_から組み立てる(review_owner):
-    _create(repo="my-repo", pr_number=42)
+def test_一覧の_url_はレビューのオーナーから組み立てる():
+    _create(owner="other-org", repo="my-repo", pr_number=42)
 
-    assert reviews.list_summary()[0]["url"] == (
-        "https://github.com/example-org/my-repo/pull/42"
-    )
+    entry = reviews.list_summary()[0]
+    assert entry["owner"] == "other-org"
+    assert entry["url"] == "https://github.com/other-org/my-repo/pull/42"
 
 
 def test_一覧は詳細の有無を示す():
@@ -154,9 +162,28 @@ def test_一覧は詳細の有無を示す():
 def test_リポジトリで絞り込める():
     _create(repo="repo-a")
     _create(repo="repo-b")
+    _create(owner="other-org", repo="repo-a")
 
-    assert reviews.count(repo="repo-a") == 1
-    assert [e["repo"] for e in reviews.list_summary(repo="repo-a")] == ["repo-a"]
+    assert reviews.count(repo="example-org/repo-a") == 1
+    entries = reviews.list_summary(repo="example-org/repo-a")
+    assert [(e["owner"], e["repo"]) for e in entries] == [("example-org", "repo-a")]
+
+
+def test_リポジトリ名だけならオーナーを問わず絞り込む():
+    """オーナーを 1 つに固定していた頃の指定 (repo=名前) をそのまま使えるように。"""
+    _create(repo="repo-a")
+    _create(repo="repo-b")
+    _create(owner="other-org", repo="repo-a")
+
+    assert reviews.count(repo="repo-a") == 2
+
+
+def test_サブグループを含むオーナーでも絞り込める():
+    """GitLab のオーナーは "group/sub" の形になりうるので、最後の "/" で区切る。"""
+    _create(owner="group/sub", repo="repo-a")
+    _create(owner="group", repo="repo-a")
+
+    assert reviews.count(repo="group/sub/repo-a") == 1
 
 
 def test_本文の部分一致で絞り込める():
@@ -171,7 +198,7 @@ def test_絞り込みは併用できる():
     _create(repo="repo-a", body="injection")
     _create(repo="repo-b", body="injection")
 
-    assert reviews.count(repo="repo-a", q="injection") == 1
+    assert reviews.count(repo="example-org/repo-a", q="injection") == 1
 
 
 def test_ページングできる():
@@ -214,49 +241,58 @@ def test_絞り込み用のリポジトリ名は重複せず並ぶ():
     _create(repo="repo-b", pr_number=1)
     _create(repo="repo-a", pr_number=2)
     _create(repo="repo-b", pr_number=3)
+    _create(owner="another-org", repo="repo-b", pr_number=1)
 
-    assert reviews.repos() == ["repo-a", "repo-b"]
+    assert reviews.repos() == [
+        "another-org/repo-b", "example-org/repo-a", "example-org/repo-b",
+    ]
 
 
 # --- PR タイトルのキャッシュ ------------------------------------------------
 def test_タイトルを保存して読める():
-    reviews.put_title("my-repo", 1, "PR のタイトル")
+    reviews.put_title("example-org", "my-repo", 1, "PR のタイトル")
 
-    assert reviews.cached_title("my-repo", 1) == "PR のタイトル"
+    assert reviews.cached_title("example-org", "my-repo", 1) == "PR のタイトル"
 
 
 def test_空のタイトルは保存しない():
-    reviews.put_title("my-repo", 1, "")
+    reviews.put_title("example-org", "my-repo", 1, "")
 
-    assert reviews.cached_title("my-repo", 1) is None
+    assert reviews.cached_title("example-org", "my-repo", 1) is None
 
 
 def test_タイトルは上書きできる():
-    reviews.put_title("my-repo", 1, "旧タイトル")
-    reviews.put_title("my-repo", 1, "新タイトル")
+    reviews.put_title("example-org", "my-repo", 1, "旧タイトル")
+    reviews.put_title("example-org", "my-repo", 1, "新タイトル")
 
-    assert reviews.cached_title("my-repo", 1) == "新タイトル"
+    assert reviews.cached_title("example-org", "my-repo", 1) == "新タイトル"
 
 
 def test_期限切れのタイトルは使わない():
     """PR 名は変更されうるので恒久キャッシュにはしない。"""
     with db.write() as conn:
         conn.execute(
-            "INSERT INTO pr_titles (repo, pr_number, title, fetched_at) "
-            "VALUES (?, ?, ?, ?)",
-            ("my-repo", 1, "古いタイトル", time.time() - reviews.TITLE_TTL_SECONDS - 1),
+            "INSERT INTO pr_titles (owner, repo, pr_number, title, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("example-org", "my-repo", 1, "古いタイトル", time.time() - reviews.TITLE_TTL_SECONDS - 1),
         )
 
-    assert reviews.cached_title("my-repo", 1) is None
+    assert reviews.cached_title("example-org", "my-repo", 1) is None
 
 
 def test_未取得のタイトルは_none():
-    assert reviews.cached_title("my-repo", 999) is None
+    assert reviews.cached_title("example-org", "my-repo", 999) is None
+
+
+def test_タイトルはオーナーごとに持つ():
+    reviews.put_title("example-org", "my-repo", 1, "こちらの PR")
+
+    assert reviews.cached_title("other-org", "my-repo", 1) is None
 
 
 def test_一覧のタイトルはキャッシュから引く():
     _create(repo="my-repo", pr_number=1)
-    reviews.put_title("my-repo", 1, "PR のタイトル")
+    reviews.put_title("example-org", "my-repo", 1, "PR のタイトル")
 
     entries = reviews.list_summary()
 
@@ -277,25 +313,28 @@ def _pull(title: str) -> github_api.PullRequest:
     )
 
 
-def test_未取得と失効ぶんだけを取り直す(monkeypatch, review_owner):
+def test_未取得と失効ぶんだけを取り直す(monkeypatch):
     _create(repo="my-repo", pr_number=1)
     _create(repo="my-repo", pr_number=2)
-    reviews.put_title("my-repo", 2, "取得済み")
-    asked: list[int] = []
+    _create(owner="other-org", repo="my-repo", pr_number=2)
+    reviews.put_title("example-org", "my-repo", 2, "取得済み")
+    asked: list[tuple[str, int]] = []
 
     def fake_get_pull(provider, owner, repo, number):
-        asked.append(number)
+        asked.append((owner, number))
         return _pull(f"PR {number}")
 
     monkeypatch.setattr(github_api, "get_pull", fake_get_pull)
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
 
-    assert reviews.refresh_titles() == 1
-    assert asked == [1]
-    assert reviews.cached_title("my-repo", 1) == "PR 1"
+    assert reviews.refresh_titles() == 2
+    # レビューのオーナーで引く。
+    assert sorted(asked) == [("example-org", 1), ("other-org", 2)]
+    assert reviews.cached_title("example-org", "my-repo", 1) == "PR 1"
+    assert reviews.cached_title("other-org", "my-repo", 2) == "PR 2"
 
 
-def test_取得件数に上限を設ける(monkeypatch, review_owner):
+def test_取得件数に上限を設ける(monkeypatch):
     for n in range(5):
         _create(pr_number=n)
 
@@ -303,12 +342,12 @@ def test_取得件数に上限を設ける(monkeypatch, review_owner):
         github_api, "get_pull",
         lambda *a, **k: _pull("t"),
     )
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
 
     assert reviews.refresh_titles(limit=2) == 2
 
 
-def test_一部の取得に失敗しても集計は成立させる(monkeypatch, review_owner):
+def test_一部の取得に失敗しても集計は成立させる(monkeypatch):
     _create(pr_number=1)
     _create(pr_number=2)
 
@@ -318,11 +357,11 @@ def test_一部の取得に失敗しても集計は成立させる(monkeypatch, 
         return _pull("PR 2")
 
     monkeypatch.setattr(github_api, "get_pull", fake_get_pull)
-    monkeypatch.setattr(github_auth, "get_provider", lambda: object())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: object())
 
     assert reviews.refresh_titles() == 1
-    assert reviews.cached_title("my-repo", 1) is None
-    assert reviews.cached_title("my-repo", 2) == "PR 2"
+    assert reviews.cached_title("example-org", "my-repo", 1) is None
+    assert reviews.cached_title("example-org", "my-repo", 2) == "PR 2"
 
 
 def test_取り直しの多重起動を避ける(monkeypatch):

@@ -216,7 +216,7 @@ def test_git_にはトークンを環境変数の_credential_helper_で渡す(mo
         def token(self) -> str:
             return "gh-token"
 
-    monkeypatch.setattr(github_auth, "get_provider", lambda: Provider())
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: Provider())
 
     env = review._git_env(ParsedPR(owner="example-org", repo="my-repo", number=1))
 
@@ -382,7 +382,8 @@ def test_作業ディレクトリが無ければ_init_して_origin_を付ける
 
     repo_path = review._prepare_repo(pr, lambda _msg: None)
 
-    assert repo_path == work / "my-repo"
+    # 名前が同じリポジトリでもオーナーが違えば混ざらないよう、オーナーの下に作る。
+    assert repo_path == work / "example-org" / "my-repo"
     assert (repo_path / ".git").is_dir()
     assert _git(repo_path, "remote", "get-url", "origin") == (
         "https://github.com/example-org/my-repo.git"
@@ -405,20 +406,20 @@ def test_初期化に失敗したら中途半端なディレクトリを残さ�
 
     with pytest.raises(ReviewError, match="remote add"):
         review._prepare_repo(pr, lambda _msg: None)
-    assert not (work / "my-repo").exists()
+    assert not (work / "example-org" / "my-repo").exists()
 
 
 @需要git
 def test_作業ディレクトリの_remote_が_pr_と違えば実行しない(temp_paths, monkeypatch):
     work, _ = temp_paths
-    repo_path = work / "my-repo"
+    repo_path = work / "example-org" / "my-repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin",
          "https://github.com/example-org/other-repo.git"],
         check=True,
     )
-    monkeypatch.setattr(github_auth, "get_provider", lambda: None)
+    monkeypatch.setattr(github_auth, "get_provider", lambda *_: None)
     pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
 
     with pytest.raises(ReviewError, match="一致しません"):
@@ -428,7 +429,7 @@ def test_作業ディレクトリの_remote_が_pr_と違えば実行しない(t
 @需要git
 def test_remote_url_の形式が想定外なら実行しない(temp_paths, monkeypatch):
     work, _ = temp_paths
-    repo_path = work / "my-repo"
+    repo_path = work / "example-org" / "my-repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin",
@@ -443,7 +444,7 @@ def test_remote_url_の形式が想定外なら実行しない(temp_paths, monke
 
 def test_git_リポジトリでないディレクトリは弾く(temp_paths):
     work, _ = temp_paths
-    (work / "my-repo").mkdir()
+    (work / "example-org" / "my-repo").mkdir(parents=True)
     pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
 
     with pytest.raises(ReviewError, match="git リポジトリではありません"):
@@ -455,7 +456,7 @@ def test_git_リポジトリでないディレクトリは弾く(temp_paths):
 def fake_token(monkeypatch):
     """_git_env が呼ぶトークン取得を差し替える (ローカルの upstream には要らない)。"""
     monkeypatch.setattr(
-        github_auth, "get_provider", lambda: SimpleNamespace(token=lambda: "t")
+        github_auth, "get_provider", lambda *_: SimpleNamespace(token=lambda: "t")
     )
 
 

@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Protocol
 
 if TYPE_CHECKING:
+    from .findings import Roots
     from .reviews import Review
 
 ProgressFn = Callable[[str], None]
@@ -79,14 +79,14 @@ class Forge(Protocol):
         repo: str,
         number: int,
         review: Review,
-        repo_path: Path,
+        roots: Roots,
         progress: ProgressFn,
     ) -> None:
         """レビューを PR に投稿する。
 
         行コメントに対応するかどうか、対応しても位置を解決できなかったときに
         どう投稿し直すかは forge ごとに決める。どの経路でも指摘の内容は PR に残す。
-        repo_path は codex が動いた作業ツリーで、指摘のパスを相対に直すのに使う。
+        roots は codex が動いた作業ツリーの候補で、指摘のパスを相対に直すのに使う。
         """
         ...
 

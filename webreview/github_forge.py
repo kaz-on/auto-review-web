@@ -8,8 +8,9 @@ REST API は github_api、トークンは github_auth が受け持ち、ここ�
 from __future__ import annotations
 
 import re
-from pathlib import Path
+
 from . import findings, github_api, github_auth, reviews
+from .findings import Roots
 from .forge import GitCredential, ProgressFn, PullRequest
 from .reviews import Review
 
@@ -47,11 +48,11 @@ class GitHubForge:
         return GitCredential(
             url=_WEB_URL,
             username="x-access-token",
-            password=github_auth.get_provider().token(),
+            password=github_auth.get_provider(owner).token(),
         )
 
     def get_pull(self, owner: str, repo: str, number: int) -> PullRequest:
-        return github_api.get_pull(github_auth.get_provider(), owner, repo, number)
+        return github_api.get_pull(github_auth.get_provider(owner), owner, repo, number)
 
     def post_review(
         self,
@@ -59,14 +60,14 @@ class GitHubForge:
         repo: str,
         number: int,
         review: Review,
-        repo_path: Path,
+        roots: Roots,
         progress: ProgressFn,
     ) -> None:
         """位置の読み取れた指摘はソース行へのコメントにし、残り (全体の要約や書式の
         読めなかったぶん) をレビュー本体の本文にする。GitHub が位置を解決できないと
         レビューごと 422 で弾かれるため、そのときは本文にまとめて投稿し直す。
         """
-        summary, found = findings.extract(review.body, repo_path)
+        summary, found = findings.extract(review.body, roots)
         comments = [f.comment() for f in found]
 
         if comments:
@@ -89,7 +90,7 @@ class GitHubForge:
             progress(f"PR #{number} にレビューを投稿します...")
 
         github_api.create_review(
-            github_auth.get_provider(),
+            github_auth.get_provider(owner),
             owner,
             repo,
             number,
@@ -114,7 +115,7 @@ class GitHubForge:
         """
         try:
             github_api.create_review(
-                github_auth.get_provider(),
+                github_auth.get_provider(owner),
                 owner,
                 repo,
                 number,

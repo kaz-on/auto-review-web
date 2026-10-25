@@ -29,7 +29,7 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 - 信頼できる LAN 内だけで使い、インターネットには公開しない。外から使う場合は、認証付きのリバースプロキシや VPN の後ろに置く。
 - 既定では実行している PC 自身（`127.0.0.1`）からしか接続できない。LAN 内のほかの PC から使う場合は `REVIEW_HOST=0.0.0.0` にする（docker compose でもホストで直接起動する場合でも同じ）。
-- レビューできるのは `REVIEW_OWNER` のリポジトリへの PR に限られる。ただし codex は PR のコードや説明文を読むので、fork から出された PR のように信頼できない人が書いた内容は、レビュー結果に影響しうる（プロンプトインジェクション）。PR が `AGENTS.md` を書き換えた場合も同様（下記「プロジェクト固有のレビュー観点」）。codex は read-only のサンドボックスで動かしており、作業ツリーを書き換えることはない。
+- レビューできるのは `REVIEW_OWNER` に書いたオーナーのリポジトリへの PR に限られる（カンマ区切りで複数書ける。「すべて許可」の指定はない）。ただし codex は PR のコードや説明文を読むので、fork から出された PR のように信頼できない人が書いた内容は、レビュー結果に影響しうる（プロンプトインジェクション）。PR が `AGENTS.md` を書き換えた場合も同様（下記「プロジェクト固有のレビュー観点」）。codex は read-only のサンドボックスで動かしており、作業ツリーを書き換えることはない。
 
 ## 動作要件
 
@@ -46,16 +46,18 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 ### `app`
 
-GitHub App の秘密鍵から installation access token を都度発行する。App には **Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、`REVIEW_OWNER` のアカウント（Organization または個人アカウント）にインストールしておく。
+GitHub App の秘密鍵から installation access token を都度発行する。App には **Contents = Read / Pull requests = Read and write / Metadata = Read** の権限を与え、`REVIEW_OWNER` のアカウント（Organization または個人アカウント）にインストールしておく。`REVIEW_OWNER` に複数のオーナーを書いた場合は、そのすべてにインストールする。
 
 ```ini
 GITHUB_AUTH_MODE=app
 GITHUB_APP_CLIENT_ID=Iv23li...              # App の Client ID（App ID でも可）
 GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem
-GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決
+GITHUB_APP_INSTALLATION_ID=                 # 省略時は REVIEW_OWNER から自動解決（オーナーが複数なら省略する）
 ```
 
 秘密鍵（`.pem`）はリポジトリ直下の `secrets/` に置く。docker compose がこれを `/run/secrets` へ read-only でマウントする（`secrets/` は `.gitignore` 済み）。
+
+installation はオーナーごとに分かれているので、トークンもオーナーごとに発行する。`GITHUB_APP_INSTALLATION_ID` を指定できるのはオーナーが 1 つのときだけで、複数のときは省略してオーナーごとに自動で解決させる。
 
 installation access token は GitHub にアクセスする直前に取得し、失効が近ければ再発行するので、常駐させていても切れない。トークンの受け渡しの仕組みは [docs/design.md](docs/design.md#github-トークンの扱い) を参照。
 
@@ -122,6 +124,16 @@ export REVIEW_OWNER=<your-org-or-user>
 
 `REVIEW_OWNER` が未設定のまま起動すると、サーバーは立ち上がるがレビューはすべて拒否される（起動ログに `[warn]` が出る）。
 
+## レビュー対象のオーナー（`REVIEW_OWNER`）
+
+`REVIEW_OWNER` にはレビューを許可するオーナー（Organization 名または個人アカウント名）を書く。`REVIEW_OWNER=team-a,team-b` のようにカンマ区切りで複数書ける。オーナー名は完全一致で照合する（大文字小文字も区別する）。
+
+認証の仕組みがないこのツールでは、オーナーの制約がレビュー・投稿できる範囲を絞る唯一の関門なので、「すべて許可」の指定は設けていない。空のままならすべて拒否する。
+
+オーナーが違えば同じ名前のリポジトリも別のものとして扱う。画面と集計では `owner/repo` の形で表示する。
+
+オーナーを 1 つしか書けなかった版から更新すると、初回の起動時に DB をオーナー付きの形へ移行する。既存のレビューのオーナーは、そのレビューを実行したジョブから埋める。ジョブが消えていれば `REVIEW_OWNER` の先頭のオーナーで埋めるので、**オーナーを増やす前に、いったん今の設定のまま更新して起動する**。
+
 初回は自動で仮想環境を作成し、依存（Flask）をインストールする。起動後、ブラウザから `http://localhost:8080/` でアクセスする。LAN 内のほかの PC から使う場合は `REVIEW_HOST=0.0.0.0` を設定する（Docker の場合と同じ）。
 
 手動で起動する場合:
@@ -140,10 +152,10 @@ python3 -m venv .venv
 | `GH_TOKEN` | （空） | `pat` モードの Personal Access Token |
 | `GITHUB_APP_CLIENT_ID` | （空） | `app` モードの Client ID（App ID も可） |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
-| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決 |
+| `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決。オーナーが複数なら指定できない |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。通常は変更不要（PR や clone の URL は github.com 固定のため、変えても GitHub Enterprise Server には対応しない） |
-| `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名） |
+| `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名）。カンマ区切りで複数指定できる（上記「レビュー対象のオーナー」） |
 | `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
@@ -187,7 +199,7 @@ REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実�
 | `GET /api/reviews/<id>` | ジョブ詳細（レビュー本文を含む） |
 | `POST /api/reviews/<id>/post` | 完了したレビューを PR に投稿 |
 | `DELETE /api/reviews/<id>` | 終了したジョブを履歴から削除 |
-| `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない |
+| `GET /api/summary` | レビューの集計一覧（`limit` / `offset` / `repo` / `q`）。本文は含まない。`repo` は `owner/repo` の形（リポジトリ名だけならオーナーを問わず絞り込む） |
 | `GET /api/summary/<id>` | レビュー本文と詳細情報 |
 | `GET /api/export/reviews.csv` | レビュー単位の CSV（`repo` / `q` で絞り込み。下記「CSV エクスポート」） |
 | `GET /api/export/findings.csv` | 指摘単位の CSV（同上） |
