@@ -22,14 +22,16 @@ import posixpath
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from urllib.parse import unquote
 
 # (リポジトリからの相対パス, 開始行, 終了行) から blob の URL を作る。行が無ければ None。
 BlobUrl = Callable[[str, "int | None", "int | None"], str]
 
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _CODE_SPAN_RE = re.compile(r"(`+)(.+?)\1")
-# パスに使える文字。空白や括弧、引用符、日本語の句読点で区切る。
-_PATH_CHARS = r"[^\s:()\[\]`'\"<>、。，．）（]+"
+# パスに使える文字。空白や括弧、引用符、日本語の句読点で区切る。"#" はリンクの
+# アンカー (a.py#L3) の区切りとして扱い、パスには含めない。
+_PATH_CHARS = r"[^\s:()\[\]`'\"<>#、。，．）（]+"
 _LINE_RANGE = r"(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?"
 _LINK_RE = re.compile(r"\[(?P<text>[^\]\n]*)\]\((?P<target>[^)\s]+)\)")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -76,23 +78,26 @@ class _Rewriter:
         return self._abs_re.sub(self._relative_text, text)
 
     def line(self, text: str) -> str:
-        """コードブロックの外の 1 行。インラインコードの中はコードとして扱う。"""
-        out: list[str] = []
-        pos = 0
-        for m in _CODE_SPAN_RE.finditer(text):
-            out.append(self._prose(text[pos:m.start()]))
-            out.append(m.group(1) + self.code(m.group(2)) + m.group(1))
-            pos = m.end()
-        out.append(self._prose(text[pos:]))
-        return "".join(out)
+        """コードブロックの外の 1 行。
 
-    def _prose(self, text: str) -> str:
-        """地の文。Markdown のリンクと絶対パスを置き換える。"""
+        Markdown のリンクとインラインコードは、先に始まるほうを 1 つの単位として
+        扱う。リンクの表示文字列にインラインコードが入ること (``[`a.py`](a.py)``)
+        も、インラインコードの中にリンクの形が入ること (`` `[x](a.py)` ``) もあり、
+        どちらかで先に切り分けると、もう一方が分断されて読めなくなる。
+        """
         out: list[str] = []
         pos = 0
-        for m in _LINK_RE.finditer(text):
+        while True:
+            link = _LINK_RE.search(text, pos)
+            span = _CODE_SPAN_RE.search(text, pos)
+            m = min((x for x in (link, span) if x), key=lambda x: x.start(), default=None)
+            if m is None:
+                break
             out.append(self._bare_paths(text[pos:m.start()]))
-            out.append(self._link(m.group("text"), m.group("target")))
+            if m is link:
+                out.append(self._link(m.group("text"), m.group("target")))
+            else:
+                out.append(m.group(1) + self.code(m.group(2)) + m.group(1))
             pos = m.end()
         out.append(self._bare_paths(text[pos:]))
         return "".join(out)
@@ -136,6 +141,9 @@ class _Rewriter:
         path, _, fragment = target.partition("#")
         if not path or target.startswith("//") or _SCHEME_RE.match(path):
             return None
+        # リンク先は URL なので、空白や日本語はエンコードされている。リポジトリの
+        # パスとして扱うためにデコードする (URL にするときに blob_url がエンコードし直す)。
+        path = unquote(path)
         if path.startswith("/"):
             # 作業ツリーの絶対パスだけを扱う。それ以外の "/..." は何を指すか分からない。
             relative = self._under_root(path)

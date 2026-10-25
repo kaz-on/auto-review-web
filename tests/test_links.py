@@ -123,6 +123,45 @@ def test_リポジトリのファイルを指さないリンクは触らない(l
     assert linkify(link, ROOTS, blob) == link
 
 
+def test_表示文字列にインラインコードを含むリンクも変換する():
+    assert linkify("[`AGENTS.md`](AGENTS.md#L14-L15)", ROOTS, blob) == (
+        "[`AGENTS.md`](https://host/blob/SHA/AGENTS.md#14-15)"
+    )
+
+
+def test_表示文字列にインラインコードを含む絶対パスのリンクも壊さない():
+    assert linkify("[`/work/org/repo/a.py`](/work/org/repo/a.py#L2)", ROOTS, blob) == (
+        "[`a.py`](https://host/blob/SHA/a.py#2-2)"
+    )
+
+
+def test_リンクの前後のインラインコードはそれぞれ扱う():
+    text = "`/work/org/repo/a.py:1` と [b](b.py#L2) と `[c](c.py)`"
+
+    assert linkify(text, ROOTS, blob) == (
+        "`a.py:1` と [b](https://host/blob/SHA/b.py#2-2) と `[c](c.py)`"
+    )
+
+
+def test_エンコードされたリンク先はデコードしてから組み立てる():
+    """blob_url がエンコードし直すので、そのまま渡すと %20 が %2520 になる。"""
+    assert linkify("[設計](docs/design%20notes.md#L2)", ROOTS, blob) == (
+        "[設計](https://host/blob/SHA/docs/design notes.md#2-2)"
+    )
+
+
+def test_エンコードしてリポジトリの外を指すリンク先も触らない():
+    link = "[外へ](%2e%2e/other/a.py)"
+
+    assert linkify(link, ROOTS, blob) == link
+
+
+def test_アンカー付きの絶対パスはアンカーをパスに含めない():
+    assert linkify("/work/org/repo/a.py#L2", ROOTS, blob) == (
+        "[a.py](https://host/blob/SHA/a.py)#L2"
+    )
+
+
 def test_インラインコードの中は相対パスに直すだけ():
     text = "`/work/org/repo/a.py:3` と `[x](a.py)`"
 

@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+from functools import partial
+from pathlib import Path
+
 import pytest
 
 from webreview import config, github_api, github_auth, reviews
 from webreview.errors import ReviewError
 from webreview.github_forge import GitHubForge
+from webreview.links import linkify
 
 
 @pytest.fixture
@@ -238,3 +242,11 @@ def test_レビューしたコミットが分からない古いレビューは�
     compat.post_review("o", "r", 1, review, (root,), lambda _l: None)
 
     assert posted[0].endswith("- [P1] 指摘 — a.py:3\n")
+
+
+def test_日本語や空白を含むリンク先は一度だけエンコードする():
+    blob = partial(GitHubForge().blob_url, "o", "r", "abc")
+
+    assert linkify("[設計](docs/%E8%A8%AD%E8%A8%88%20memo.md#L2)", (Path("/w"),), blob) == (
+        "[設計](https://github.com/o/r/blob/abc/docs/%E8%A8%AD%E8%A8%88%20memo.md#L2)"
+    )
