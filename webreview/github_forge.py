@@ -11,9 +11,10 @@ clone URL の形、git の認証に通るユーザー名、レビュー API の�
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from functools import partial
+from urllib.parse import quote, urlsplit
 
-from . import config, findings, github_api, github_auth, reviews
+from . import config, findings, github_api, github_auth, links, reviews
 from .errors import ReviewError
 from .findings import Roots
 from .forge import GitCredential, ProgressFn, PullRequest
@@ -73,6 +74,16 @@ class GitHubForge:
     def pr_url_pattern(self) -> str:
         return f"{self._web}/<owner>/<repo>/pull/<番号>"
 
+    def blob_url(
+        self, owner: str, repo: str, sha: str, path: str,
+        start: int | None = None, end: int | None = None,
+    ) -> str:
+        url = f"{self._web}/{owner}/{repo}/blob/{sha}/{quote(path)}"
+        if start is None:
+            return url
+        # 互換のサービスも同じ "#L<開始>-L<終了>" を解釈する (確かめ済み)。
+        return f"{url}#L{start}" if end in (None, start) else f"{url}#L{start}-L{end}"
+
     def clone_url(self, owner: str, repo: str) -> str:
         return self._clone_template.replace("{owner}", owner).replace("{repo}", repo)
 
@@ -108,6 +119,15 @@ class GitHubForge:
         レビュー API の無いサービス (GITHUB_POST_MODE=issue_comment) には、本文全体を
         1 件のコメントとして投稿する。行コメントが弾かれたときと同じ形になる。
         """
+        blob = (
+            partial(self.blob_url, owner, repo, review.head_commit)
+            if review.head_commit
+            else None
+        )
+
+        def linked(text: str) -> str:
+            return links.linkify(text, roots, blob)
+
         if self._post_mode == "issue_comment":
             progress(f"PR #{number} にコメントとして投稿します...")
             github_api.create_issue_comment(
@@ -115,12 +135,15 @@ class GitHubForge:
                 owner,
                 repo,
                 number,
-                reviews.render_body(review),
+                linked(reviews.render_body(review)),
             )
             return
 
         summary, found = findings.extract(review.body, roots)
         comments = [f.comment() for f in found]
+        for comment in comments:
+            # 行コメント自体はその行に付くが、説明の中で別のファイルに触れることがある。
+            comment["body"] = linked(comment["body"])
 
         if comments:
             progress(
@@ -131,7 +154,7 @@ class GitHubForge:
                 owner,
                 repo,
                 number,
-                f"{reviews.header_line(review)}\n\n{summary}".rstrip(),
+                linked(f"{reviews.header_line(review)}\n\n{summary}".rstrip()),
                 comments,
                 review.head_commit,
             )
@@ -146,7 +169,7 @@ class GitHubForge:
             owner,
             repo,
             number,
-            reviews.render_body(review),
+            linked(reviews.render_body(review)),
             commit_id=review.head_commit,
         )
 

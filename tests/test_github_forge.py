@@ -149,3 +149,92 @@ def test_設定に不備があれば分かる形で失敗する(monkeypatch, nam
 
     with pytest.raises(ReviewError, match=message):
         GitHubForge()
+
+
+# --- blob へのリンク ----------------------------------------------------------
+def test_blob_の_url_はコミットに固定して行範囲を指す():
+    forge = GitHubForge()
+
+    assert forge.blob_url("o", "r", "abc", "src/a.py", 40, 45) == (
+        "https://github.com/o/r/blob/abc/src/a.py#L40-L45"
+    )
+    assert forge.blob_url("o", "r", "abc", "a.py", 7, 7) == (
+        "https://github.com/o/r/blob/abc/a.py#L7"
+    )
+    assert forge.blob_url("o", "r", "abc", "a.py") == "https://github.com/o/r/blob/abc/a.py"
+
+
+def test_blob_の_url_のパスはエンコードする():
+    assert GitHubForge().blob_url("o", "r", "abc", "docs/設計 メモ.md") == (
+        "https://github.com/o/r/blob/abc/docs/%E8%A8%AD%E8%A8%88%20%E3%83%A1%E3%83%A2.md"
+    )
+
+
+def test_互換のサービスでは本文のパスをコミットの_blob_へのリンクにする(
+    compat, monkeypatch, temp_db, tmp_path
+):
+    posted: list[str] = []
+    monkeypatch.setattr(github_auth, "get_provider", lambda owner: _Provider(owner))
+    monkeypatch.setattr(
+        github_api, "create_issue_comment",
+        lambda provider, owner, repo, number, body: posted.append(body),
+    )
+    root = tmp_path / "work" / "o" / "r"
+    review = reviews.create(
+        owner="o", repo="r", pr_number=1, model="m", head_commit="abc",
+        body=f"- [P1] 指摘 — {root}/a.py:3-4\n  [CR-004](AGENTS.md#L14-L15) に反します。\n",
+    )
+
+    compat.post_review("o", "r", 1, review, (root,), lambda _l: None)
+
+    web = "http://git.example.local:8888/o/r/blob/abc"
+    assert posted[0].endswith(
+        f"- [P1] 指摘 — [a.py:3-4]({web}/a.py#L3-L4)\n"
+        f"  [CR-004]({web}/AGENTS.md#L14-L15) に反します。\n"
+    )
+
+
+def test_行コメントの説明と本文に残った部分もリンクにする(monkeypatch, temp_db, tmp_path):
+    calls: list[dict] = []
+    monkeypatch.setattr(github_auth, "get_provider", lambda owner: _Provider(owner))
+    monkeypatch.setattr(
+        github_api, "create_review",
+        lambda provider, owner, repo, number, body, comments=None, commit_id=None:
+            calls.append({"body": body, "comments": comments}),
+    )
+    root = tmp_path / "work" / "o" / "r"
+    review = reviews.create(
+        owner="o", repo="r", pr_number=1, model="m", head_commit="abc",
+        body=(
+            f"要約。{root}/b.py にも同じ問題がある。\n\n"
+            f"- [P1] 指摘 — {root}/a.py:3-3\n  [CR-004](AGENTS.md#L14) に反します。\n"
+        ),
+    )
+
+    GitHubForge().post_review("o", "r", 1, review, (root,), lambda _l: None)
+
+    web = "https://github.com/o/r/blob/abc"
+    assert calls[0]["body"].endswith(f"要約。[b.py]({web}/b.py) にも同じ問題がある。")
+    # 行コメントの位置は相対パスのまま、説明の中のリンクだけを置き換える。
+    [comment] = calls[0]["comments"]
+    assert comment["path"] == "a.py"
+    assert comment["body"].endswith(f"[CR-004]({web}/AGENTS.md#L14) に反します。")
+
+
+def test_レビューしたコミットが分からない古いレビューは相対パスに直すだけ(
+    compat, monkeypatch, temp_db, tmp_path
+):
+    posted: list[str] = []
+    monkeypatch.setattr(github_auth, "get_provider", lambda owner: _Provider(owner))
+    monkeypatch.setattr(
+        github_api, "create_issue_comment",
+        lambda provider, owner, repo, number, body: posted.append(body),
+    )
+    root = tmp_path / "work" / "o" / "r"
+    review = reviews.create(
+        owner="o", repo="r", pr_number=1, model="m", body=f"- [P1] 指摘 — {root}/a.py:3\n",
+    )
+
+    compat.post_review("o", "r", 1, review, (root,), lambda _l: None)
+
+    assert posted[0].endswith("- [P1] 指摘 — a.py:3\n")

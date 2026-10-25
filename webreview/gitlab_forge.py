@@ -11,16 +11,17 @@ github_forge との主な違い:
 * 投稿は MR へのコメント (note) 1 件だけ。行コメント (discussions) は位置の指定が
   複雑なうえ 1 件ずつ投稿するので一部だけ失敗しうるため、まだ扱わない。
 * GitLab の Markdown は単独の改行を改行として表示しないので、投稿するときだけ
-  改行を明示する (_hard_breaks)。
+  改行を明示する (_hard_breaks)。ファイルへのリンク (links) の行範囲は "#L40-45"。
 """
 
 from __future__ import annotations
 
 import re
 import time
-from urllib.parse import urlsplit
+from functools import partial
+from urllib.parse import quote, urlsplit
 
-from . import config, gitlab_api, reviews
+from . import config, gitlab_api, links, reviews
 from .errors import ReviewError
 from .findings import Roots
 from .forge import GitCredential, ProgressFn, PullRequest
@@ -72,6 +73,16 @@ class GitLabForge:
 
     def pr_url_pattern(self) -> str:
         return f"{self._web}/<group>/<project>/-/merge_requests/<番号>"
+
+    def blob_url(
+        self, owner: str, repo: str, sha: str, path: str,
+        start: int | None = None, end: int | None = None,
+    ) -> str:
+        url = f"{self._web}/{owner}/{repo}/-/blob/{sha}/{quote(path)}"
+        if start is None:
+            return url
+        # GitLab の行範囲は "#L<開始>-<終了>" (GitHub と違い終了側に L を付けない)。
+        return f"{url}#L{start}" if end in (None, start) else f"{url}#L{start}-{end}"
 
     def clone_url(self, owner: str, repo: str) -> str:
         return f"{self._web}/{owner}/{repo}.git"
@@ -135,10 +146,14 @@ class GitLabForge:
         progress: ProgressFn,
     ) -> None:
         """ヘッダ付きの本文全体を MR へのコメント 1 件として投稿する。"""
-        progress(f"MR !{number} にコメントとして投稿します...")
-        gitlab_api.create_note(
-            _token(), owner, repo, number, _hard_breaks(reviews.render_body(review))
+        blob = (
+            partial(self.blob_url, owner, repo, review.head_commit)
+            if review.head_commit
+            else None
         )
+        body = links.linkify(reviews.render_body(review), roots, blob)
+        progress(f"MR !{number} にコメントとして投稿します...")
+        gitlab_api.create_note(_token(), owner, repo, number, _hard_breaks(body))
 
 
 def _token() -> str:

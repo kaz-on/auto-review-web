@@ -211,6 +211,38 @@ def test_本文全体を改行を明示して_1_件のコメントにする(monk
     assert any("MR !1" in line for line in lines)
 
 
+def test_blob_の_url_は_gitlab_の行範囲の書き方にする():
+    host = GitLabForge()
+
+    assert host.blob_url("group/sub", "project", "abc", "src/a.py", 40, 45) == (
+        f"{WEB}/group/sub/project/-/blob/abc/src/a.py#L40-45"
+    )
+    assert host.blob_url("group", "project", "abc", "a.py", 7, 7) == (
+        f"{WEB}/group/project/-/blob/abc/a.py#L7"
+    )
+
+
+def test_本文のパスと相対リンクをコミットの_blob_へのリンクにして投稿する(
+    monkeypatch, temp_db, tmp_path
+):
+    posted: list = []
+    monkeypatch.setattr(gitlab_api, "create_note", lambda *a: posted.append(a[-1]))
+    root = tmp_path / "work" / "group" / "project"
+    review = reviews.create(
+        owner="group", repo="project", pr_number=1, model="m", head_commit="abc",
+        body=f"- [P1] 指摘 — {root}/a.py:3-4\n  [CR-004](AGENTS.md#L14-L15) に反します。",
+    )
+
+    GitLabForge().post_review("group", "project", 1, review, (root,), lambda _l: None)
+
+    web = f"{WEB}/group/project/-/blob/abc"
+    # リンクにしたうえで、段落の中の改行を明示する。
+    assert posted[0].endswith(
+        f"- [P1] 指摘 — [a.py:3-4]({web}/a.py#L3-4)  \n"
+        f"  [CR-004]({web}/AGENTS.md#L14-15) に反します。"
+    )
+
+
 def test_改行の明示は段落の中の改行だけに付ける():
     text = "1 行目\n2 行目\n\n段落\n\n```\nx = 1\ny = 2\n```\n末尾"
 

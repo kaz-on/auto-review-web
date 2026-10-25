@@ -75,6 +75,13 @@ class Forge(Protocol):
         """入力欄の例に出す PR の URL の形 (例: https://github.com/<owner>/<repo>/pull/<番号>)。"""
         ...
 
+    def blob_url(
+        self, owner: str, repo: str, sha: str, path: str,
+        start: int | None = None, end: int | None = None,
+    ) -> str:
+        """コミット sha のファイル path を表示する URL。行が分かれば行範囲まで指す。"""
+        ...
+
     def clone_url(self, owner: str, repo: str) -> str:
         """作業ディレクトリの origin にする URL。"""
         ...
@@ -105,6 +112,7 @@ class Forge(Protocol):
         行コメントに対応するかどうか、対応しても位置を解決できなかったときに
         どう投稿し直すかは forge ごとに決める。どの経路でも指摘の内容は PR に残す。
         roots は codex が動いた作業ツリーの候補で、指摘のパスを相対に直すのに使う。
+        本文の中のファイルの参照は、投稿する直前に blob へのリンクにする (links)。
         """
         ...
 
