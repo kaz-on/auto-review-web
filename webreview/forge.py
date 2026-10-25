@@ -57,6 +57,10 @@ class Forge(Protocol):
         """画面・CSV に出す PR の URL。"""
         ...
 
+    def pr_url_pattern(self) -> str:
+        """入力欄の例に出す PR の URL の形 (例: https://github.com/<owner>/<repo>/pull/<番号>)。"""
+        ...
+
     def clone_url(self, owner: str, repo: str) -> str:
         """作業ディレクトリの origin にする URL。"""
         ...

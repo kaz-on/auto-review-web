@@ -152,6 +152,11 @@ fetchJSON("/api/config").then((/** @type {ConfigResponse} */ cfg) => {
   const meta = /** @type {HTMLElement} */ (document.getElementById("config-meta"));
   meta.textContent = `対象: ${cfg.owners.join(", ")} / モデル: ${model}`;
   renderDescription(cfg.description);
+  // 既定 (index.html) は github.com の形。互換のサービスではそのホストの形に差し替える。
+  if (cfg.pr_url_pattern) {
+    const input = /** @type {HTMLInputElement} */ (document.getElementById("pr-url"));
+    input.placeholder = cfg.pr_url_pattern;
+  }
 }).catch(() => {});
 
 // ---- レビュー投入フォーム --------------------------------------------------

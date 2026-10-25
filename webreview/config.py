@@ -49,14 +49,42 @@ REVIEW_REASONING_EFFORT = os.environ.get("REVIEW_REASONING_EFFORT", "medium").st
 REVIEW_DESCRIPTION = os.environ.get("REVIEW_DESCRIPTION", "").replace("\\n", "\n").strip()
 
 
+# --- PR をホストするサービス ------------------------------------------------
+# 既定は github.com。GitHub 互換の REST API を持つセルフホストのサービスを使うときは、
+# 以下をそのサービスに合わせる (README「GitHub 互換のサービス」)。
+
+# Web の URL。PR の URL はこの下の /<owner>/<repo>/pull/<番号> の形で受け付ける。
+GITHUB_WEB_URL = (
+    os.environ.get("GITHUB_WEB_URL", "").strip() or "https://github.com"
+).rstrip("/")
+
+# REST API のベース URL。
+GITHUB_API_URL = (
+    os.environ.get("GITHUB_API_URL", "").strip() or "https://api.github.com"
+).rstrip("/")
+
+# 作業ディレクトリの origin にする URL。{web} / {owner} / {repo} を置き換える。
+GITHUB_CLONE_URL = (
+    os.environ.get("GITHUB_CLONE_URL", "").strip() or "{web}/{owner}/{repo}.git"
+)
+
+# git の認証に使うユーザー名。github.com はトークンの種類によらずこの固定値で通るが、
+# サービスによってはトークンの持ち主のアカウント名でないと通らない。
+GITHUB_GIT_USERNAME = (
+    os.environ.get("GITHUB_GIT_USERNAME", "").strip() or "x-access-token"
+)
+
+# 投稿の方法。
+# "review" = レビュー API (pulls/{n}/reviews) で、指摘をソース行へのコメントにする。
+# "issue_comment" = 本文全体を 1 件のコメント (issues/{n}/comments) として投稿する。
+#                   レビュー API の無いサービス向け。
+GITHUB_POST_MODE = os.environ.get("GITHUB_POST_MODE", "").strip().lower() or "review"
+
+
 # --- GitHub 認証 --------------------------------------------------------------
 # "pat" = GH_TOKEN の Personal Access Token をそのまま使う。
 # "app" = GitHub App の秘密鍵から installation access token を都度発行する。
 GITHUB_AUTH_MODE = os.environ.get("GITHUB_AUTH_MODE", "pat").strip().lower()
-
-# GitHub REST API のベース URL。PR や clone の URL は github.com 固定なので、
-# これを変えても GitHub Enterprise Server には対応しない。
-GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
 # pat モード用。
 GH_TOKEN = os.environ.get("GH_TOKEN", "")

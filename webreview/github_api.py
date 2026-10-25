@@ -178,3 +178,21 @@ def create_review(
     _request_with_token(
         provider, "POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", payload
     )
+
+
+def create_issue_comment(
+    provider: TokenProvider,
+    owner: str,
+    repo: str,
+    number: int,
+    body: str,
+) -> None:
+    """PR にコメントを 1 件投稿する (PR は issue でもあるので issues の API で書ける)。
+
+    レビュー API (pulls/{n}/reviews) を持たない GitHub 互換のサービス向け。
+    行コメントは付けられない。
+    """
+    _request_with_token(
+        provider, "POST", f"/repos/{owner}/{repo}/issues/{number}/comments",
+        {"body": body},
+    )

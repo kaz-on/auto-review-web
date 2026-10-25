@@ -98,7 +98,10 @@ def test_画面に必要な設定を返す(client, monkeypatch):
     assert data["model"] == "gpt-6.1-sol"
     assert data["description"] == "説明文"
     # トークンや秘密鍵は返さない。
-    assert set(data) == {"owners", "model", "reasoning_effort", "description"}
+    assert data["pr_url_pattern"] == "https://github.com/<owner>/<repo>/pull/<番号>"
+    assert set(data) == {
+        "owners", "pr_url_pattern", "model", "reasoning_effort", "description",
+    }
 
 
 def test_複数のオーナーは設定に書いた順で返す(client, monkeypatch):

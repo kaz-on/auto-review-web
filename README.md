@@ -4,7 +4,7 @@ LAN 内の PC からブラウザで使える、[Codex CLI](https://github.com/op
 
 Codex の実行には OpenAI の API キーが必要で、レビューのたびに API 料金がかかる。
 
-レビューの対象は GitHub（github.com）のプルリクエストだけ。GitLab などほかのサービスや GitHub Enterprise Server のリポジトリ、PR になっていないブランチやコミットはレビューできない。
+レビューの対象は GitHub（github.com）のプルリクエストと、GitHub 互換の REST API を持つセルフホストのサービスのプルリクエスト（下記「GitHub 互換のサービス」）。GitLab のリポジトリや、PR になっていないブランチやコミットはレビューできない。GitHub Enterprise Server は互換のサービスと同じ設定で動く見込みだが、確かめていない。
 
 このアプリケーションは Claude Code を利用して作成されている。
 
@@ -154,7 +154,11 @@ python3 -m venv .venv
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
 | `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決。オーナーが複数なら指定できない |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
-| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。通常は変更不要（PR や clone の URL は github.com 固定のため、変えても GitHub Enterprise Server には対応しない） |
+| `GITHUB_WEB_URL` | `https://github.com` | PR をホストするサービスの URL（上記「GitHub 互換のサービス」）。github.com なら変更不要 |
+| `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。github.com なら変更不要 |
+| `GITHUB_CLONE_URL` | `{web}/{owner}/{repo}.git` | clone URL の形。`{web}` は `GITHUB_WEB_URL` に置き換わる |
+| `GITHUB_GIT_USERNAME` | `x-access-token` | git の認証に使うユーザー名 |
+| `GITHUB_POST_MODE` | `review` | 投稿の方法（`review` = レビュー API で行コメント付き / `issue_comment` = 本文全体を 1 件のコメント） |
 | `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（Organization 名または個人アカウント名）。カンマ区切りで複数指定できる（上記「レビュー対象のオーナー」） |
 | `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
@@ -168,6 +172,25 @@ python3 -m venv .venv
 | `REVIEW_HOST` | `127.0.0.1` | 待ち受けアドレス。LAN に公開するなら `0.0.0.0` |
 | `REVIEW_PORT` | `8080` | 待ち受けポート |
 | `REVIEW_GIT_BIN` / `REVIEW_CODEX_BIN` | `git` / `codex` | 各コマンドのパス |
+
+## GitHub 互換のサービス
+
+GitHub と同じ形の REST API を持つセルフホストのサービスも、設定を合わせればレビューできる。1 つのインスタンスで扱えるのは 1 つのサービスだけで、github.com と混ぜては使えない。
+
+```ini
+GITHUB_WEB_URL=http://git.example.local:8888        # PR の URL はこの下の /<owner>/<repo>/pull/<番号>
+GITHUB_API_URL=http://git.example.local:8888/api/v3
+GITHUB_CLONE_URL={web}/git/{owner}/{repo}.git        # サービスの clone URL の形
+GITHUB_GIT_USERNAME=review-bot                       # トークンの持ち主のアカウント名
+GITHUB_POST_MODE=issue_comment                       # レビュー API が無ければ issue_comment
+GH_TOKEN=...                                         # 読み取りと PR へのコメントができるトークン
+```
+
+- **認証**: `pat` モードだけ使える。public のリポジトリでも、PR への投稿にはトークンが要る。
+- **git の認証**: github.com はユーザー名が `x-access-token` 固定で通るが、トークンの持ち主のアカウント名でないと通らないサービスがある。そのときは `GITHUB_GIT_USERNAME` にその名前を書く。
+- **投稿**: `pulls/{n}/reviews`（レビュー API）を持たないサービスでは `GITHUB_POST_MODE=issue_comment` にする。指摘をソース行へのコメントにはせず、本文全体を 1 件のコメント（`issues/{n}/comments`）として投稿する。
+- **必要な API**: `GET /repos/{owner}/{repo}/pulls/{n}` が `base.sha` / `head.sha` / `base.ref` を返すこと。マージしたあとも `base.sha` が PR の元の base のまま変わらないこと（変わると差分が空になる。[docs/design.md](docs/design.md#レビュー対象のコミット)）。
+- **git**: SHA を指定した fetch に応じること。プロトコル v2 でしか応じないサービスがあるので、アプリは fetch をプロトコル v2 に固定している。
 
 ## 説明文の書式（`REVIEW_DESCRIPTION`）
 
@@ -203,7 +226,7 @@ REVIEW_DESCRIPTION=このシステムは Codex による PR レビューを実�
 | `GET /api/summary/<id>` | レビュー本文と詳細情報 |
 | `GET /api/export/reviews.csv` | レビュー単位の CSV（`repo` / `q` で絞り込み。下記「CSV エクスポート」） |
 | `GET /api/export/findings.csv` | 指摘単位の CSV（同上） |
-| `GET /api/config` | オーナー / モデル名 / reasoning effort / 説明文 |
+| `GET /api/config` | オーナー / PR の URL の形 / モデル名 / reasoning effort / 説明文 |
 
 ### CI からの投入
 

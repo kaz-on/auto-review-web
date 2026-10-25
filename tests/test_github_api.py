@@ -304,3 +304,17 @@ def test_行コメントとレビュー対象のコミットを添えて投稿�
         "commit_id": "deadbeef",
         "comments": comments,
     }
+
+
+def test_イシューのコメントとして投稿する(capture_requests):
+    """レビュー API の無い GitHub 互換のサービスでは、PR に普通のコメントを付ける。"""
+    sent, _ = capture_requests
+
+    github_api.create_issue_comment(
+        FakeProvider("t"), "example-org", "my-repo", 42, "レビュー本文"
+    )
+
+    req = sent[0]
+    assert req.get_method() == "POST"
+    assert req.full_url.endswith("/repos/example-org/my-repo/issues/42/comments")
+    assert json.loads(req.data) == {"body": "レビュー本文"}

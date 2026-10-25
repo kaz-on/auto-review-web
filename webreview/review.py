@@ -146,11 +146,16 @@ def _git_env(pr: ParsedPR) -> dict[str, str]:
         "REVIEW_GIT_USERNAME": credential.username,
         "REVIEW_GIT_TOKEN": credential.password,
         # 既存の helper (ホストの gh 設定など) を空値で打ち消してから自前を差し込む。
-        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_COUNT": "3",
         "GIT_CONFIG_KEY_0": key,
         "GIT_CONFIG_VALUE_0": "",
         "GIT_CONFIG_KEY_1": key,
         "GIT_CONFIG_VALUE_1": _CREDENTIAL_HELPER,
+        # SHA を指定した fetch は、サーバによってはプロトコル v2 でしか通らない
+        # (v0 だと広告していないオブジェクトの要求として拒否される)。git 2.26 以降は
+        # 既定でも v2 だが、ホストの設定で v0 に戻されていても黙って失敗しないよう固定する。
+        "GIT_CONFIG_KEY_2": "protocol.version",
+        "GIT_CONFIG_VALUE_2": "2",
         # 認証に失敗したときに対話プロンプトで固まらないようにする。
         "GIT_TERMINAL_PROMPT": "0",
     })

@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import config, db, export, github_auth, reviews, store
+from . import config, db, export, forge, github_auth, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -55,6 +55,16 @@ def _check_github_auth() -> None:
     ここでは設定の読み込みだけを行い、ネットワークアクセスはしない。不備があっても
     起動自体は続け、ジョブ実行時に画面へエラーを出す (UI には到達できた方が良い)。
     """
+    try:
+        forge.get()
+    except ReviewError as e:
+        print(f"[warn] PR のホストの設定に問題があります: {e}", flush=True)
+    else:
+        print(
+            f"[info] PR のホスト: {config.GITHUB_WEB_URL} "
+            f"(投稿: {config.GITHUB_POST_MODE})",
+            flush=True,
+        )
     try:
         for owner in config.REVIEW_OWNERS or ("",):
             github_auth.get_provider(owner)
@@ -141,8 +151,14 @@ def create_app() -> Flask:
     # --- 設定 ------------------------------------------------------------
     @app.get("/api/config")
     def api_config():
+        try:
+            pr_url_pattern = forge.get().pr_url_pattern()
+        except ReviewError:
+            # 設定の不備は起動ログとレビューの投入時に知らせる。画面は開けるようにする。
+            pr_url_pattern = ""
         return jsonify({
             "owners": list(config.REVIEW_OWNERS),
+            "pr_url_pattern": pr_url_pattern,
             "model": config.REVIEW_MODEL,
             "reasoning_effort": config.REVIEW_REASONING_EFFORT,
             "description": config.REVIEW_DESCRIPTION,

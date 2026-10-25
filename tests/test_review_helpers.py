@@ -223,12 +223,14 @@ def test_git_にはトークンを環境変数の_credential_helper_で渡す(mo
     assert env["REVIEW_GIT_USERNAME"] == "x-access-token"
     assert env["REVIEW_GIT_TOKEN"] == "gh-token"
     # 既存の helper を空値で打ち消してから自前を差し込む。helper は PR のホストに限る。
-    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_COUNT"] == "3"
     assert env["GIT_CONFIG_KEY_0"] == "credential.https://github.com.helper"
     assert env["GIT_CONFIG_VALUE_0"] == ""
     assert env["GIT_CONFIG_KEY_1"] == "credential.https://github.com.helper"
     assert "REVIEW_GIT_USERNAME" in env["GIT_CONFIG_VALUE_1"]
     assert "REVIEW_GIT_TOKEN" in env["GIT_CONFIG_VALUE_1"]
+    # SHA 指定の fetch がプロトコル v0 では拒否されるサーバがあるので v2 に固定する。
+    assert (env["GIT_CONFIG_KEY_2"], env["GIT_CONFIG_VALUE_2"]) == ("protocol.version", "2")
     assert env["GIT_TERMINAL_PROMPT"] == "0"
 
 
@@ -388,6 +390,23 @@ def test_作業ディレクトリが無ければ_init_して_origin_を付ける
     assert _git(repo_path, "remote", "get-url", "origin") == (
         "https://github.com/example-org/my-repo.git"
     )
+
+
+@需要git
+def test_互換のサービスでは設定の形の_origin_で作り次回も同じものとみなす(
+    temp_paths, monkeypatch
+):
+    monkeypatch.setattr(config, "GITHUB_WEB_URL", "http://git.example.local:8888")
+    monkeypatch.setattr(config, "GITHUB_CLONE_URL", "{web}/git/{owner}/{repo}.git")
+    pr = ParsedPR(owner="example-org", repo="my-repo", number=1)
+
+    repo_path = review._prepare_repo(pr, lambda _msg: None)
+
+    assert _git(repo_path, "remote", "get-url", "origin") == (
+        "http://git.example.local:8888/git/example-org/my-repo.git"
+    )
+    # 2 回目は既存の作業ツリーの origin を検証して、そのまま使う。
+    assert review._prepare_repo(pr, lambda _msg: None) == repo_path
 
 
 @需要git

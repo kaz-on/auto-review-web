@@ -77,6 +77,8 @@ interface SkippedReviewResponse {
 interface ConfigResponse {
   /** REVIEW_OWNER に書いた順。未設定なら空の配列。 */
   owners: string[];
+  /** 入力欄の例に出す PR の URL の形。PR のホストの設定に不備があれば空。 */
+  pr_url_pattern: string;
   model: string;
   reasoning_effort: string;
   description: string;
