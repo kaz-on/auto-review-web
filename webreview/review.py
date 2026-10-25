@@ -85,19 +85,21 @@ def parse_pr_url(pr_url: str) -> ParsedPR:
     if not pr_url:
         raise ReviewError("PR の URL を入力してください。")
 
-    parsed = forge.get().parse_pr_url(pr_url)
+    host = forge.get()
+    parsed = host.parse_pr_url(pr_url)
     if parsed is None:
-        raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
+        raise ReviewError(f"{host.name} の PR URL 形式ではありません: {pr_url}")
 
     owner, repo, number = parsed
-    # オーナーとリポジトリ名はそのまま作業ディレクトリのパスになる。
-    if {owner, repo} & {".", ".."}:
-        raise ReviewError(f"GitHub の PR URL 形式ではありません: {pr_url}")
+    # オーナーとリポジトリ名はそのまま作業ディレクトリのパスになる (GitLab のオーナー
+    # はサブグループを含めて "/" で区切られる)。
+    if {*owner.split("/"), repo} & {"", ".", ".."}:
+        raise ReviewError(f"{host.name} の PR URL 形式ではありません: {pr_url}")
     if not config.REVIEW_OWNERS:
         raise ReviewError(
             "REVIEW_OWNER が設定されていません。管理者に連絡してください。"
         )
-    if owner not in config.REVIEW_OWNERS:
+    if not any(host.owner_allowed(owner, allowed) for allowed in config.REVIEW_OWNERS):
         raise ReviewError(
             f"リポジトリのオーナー ({owner}) が "
             f"{', '.join(config.REVIEW_OWNERS)} のいずれでもありません。"
@@ -163,11 +165,12 @@ def _git_env(pr: ParsedPR) -> dict[str, str]:
 
 
 def _codex_env() -> dict[str, str]:
-    """codex には GitHub の認証情報を渡さない (レビューに必要ないため)。"""
+    """codex には GitHub / GitLab の認証情報を渡さない (レビューに必要ないため)。"""
     env = dict(os.environ)
     for name in (
         "GH_TOKEN",
         "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
         "REVIEW_GIT_TOKEN",
         # 廃止済みだが、古い設定で環境に残っていても codex には渡さない。
         "GITHUB_APP_PRIVATE_KEY",

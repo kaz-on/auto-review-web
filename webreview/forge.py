@@ -5,7 +5,7 @@ git の認証、PR の情報の取得、投稿をすべてこの層を通して�
 API や URL の形を直接は知らない。
 
 使う forge はプロセス全体で 1 つに決まる (1 つのインスタンスで複数のサービスを
-混ぜて扱わない)。DB はサービスを区別する列を持たないため。
+混ぜて扱わない)。DB はサービスを区別する列を持たないため。REVIEW_FORGE で選ぶ。
 """
 
 from __future__ import annotations
@@ -49,6 +49,20 @@ class GitCredential:
 
 
 class Forge(Protocol):
+    # 画面やエラーに出すサービスの名前 ("GitHub" / "GitLab")。
+    name: str
+
+    def owner_allowed(self, owner: str, allowed: str) -> bool:
+        """PR のリポジトリのオーナーが、REVIEW_OWNER に書いた 1 つ (allowed) に含まれるか。"""
+        ...
+
+    def auth_summary(self) -> str:
+        """認証の設定を確かめ、起動ログに出す要約を返す。不備があれば ReviewError。
+
+        ネットワークにはアクセスしない。
+        """
+        ...
+
     def parse_pr_url(self, url: str) -> tuple[str, str, int] | None:
         """PR の URL を (owner, repo, number) に分解する。形式が違えば None。"""
         ...
@@ -104,9 +118,22 @@ def get() -> Forge:
     global _FORGE
     with _FORGE_LOCK:
         if _FORGE is None:
-            # 実装側が github_api を import し、github_api はこのモジュールの
+            # 実装側が github_api などを import し、それらはこのモジュールの
             # PullRequest を使うので、循環しないよう呼ばれた時点で読む。
-            from .github_forge import GitHubForge
+            from . import config
+            from .errors import ReviewError
 
-            _FORGE = GitHubForge()
+            if config.REVIEW_FORGE == "github":
+                from .github_forge import GitHubForge
+
+                _FORGE = GitHubForge()
+            elif config.REVIEW_FORGE == "gitlab":
+                from .gitlab_forge import GitLabForge
+
+                _FORGE = GitLabForge()
+            else:
+                raise ReviewError(
+                    f"REVIEW_FORGE の値が不正です: {config.REVIEW_FORGE} "
+                    "(github または gitlab を指定してください)"
+                )
         return _FORGE

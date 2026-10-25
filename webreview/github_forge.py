@@ -23,6 +23,8 @@ _POST_MODES = ("review", "issue_comment")
 
 
 class GitHubForge:
+    name = "GitHub"
+
     def __init__(self) -> None:
         web = config.GITHUB_WEB_URL
         if not re.match(r"^https?://[^/]+", web):
@@ -50,6 +52,14 @@ class GitHubForge:
         # credential helper はスキームとホストで効かせる (clone URL のパスは含めない)。
         parts = urlsplit(template.replace("{owner}", "o").replace("{repo}", "r"))
         self._credential_url = f"{parts.scheme}://{parts.netloc}"
+
+    def owner_allowed(self, owner: str, allowed: str) -> bool:
+        return owner == allowed
+
+    def auth_summary(self) -> str:
+        for owner in config.REVIEW_OWNERS or ("",):
+            github_auth.get_provider(owner)
+        return f"GitHub 認証モード: {config.GITHUB_AUTH_MODE}"
 
     def parse_pr_url(self, url: str) -> tuple[str, str, int] | None:
         m = self._pr_url_re.match(url)

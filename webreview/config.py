@@ -50,8 +50,20 @@ REVIEW_DESCRIPTION = os.environ.get("REVIEW_DESCRIPTION", "").replace("\\n", "\n
 
 
 # --- PR をホストするサービス ------------------------------------------------
-# 既定は github.com。GitHub 互換の REST API を持つセルフホストのサービスを使うときは、
-# 以下をそのサービスに合わせる (README「GitHub 互換のサービス」)。
+# "github" = github.com と、GitHub 互換の REST API を持つサービス (GITHUB_* で設定)。
+# "gitlab" = GitLab (GITLAB_* で設定)。
+# 1 つのインスタンスで扱えるのはどちらか一方だけ。
+REVIEW_FORGE = os.environ.get("REVIEW_FORGE", "").strip().lower() or "github"
+
+# GitLab の URL (例: https://gitlab.example.com)。API はこの下の /api/v4。
+GITLAB_URL = os.environ.get("GITLAB_URL", "").strip().rstrip("/")
+
+# GitLab のアクセストークン。グループアクセストークン (Reporter、スコープ api と
+# read_repository) を想定する。README「GitLab」を参照。
+GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "").strip()
+
+# GitHub の既定は github.com。GitHub 互換の REST API を持つセルフホストのサービスを
+# 使うときは、以下をそのサービスに合わせる (README「GitHub 互換のサービス」)。
 
 # Web の URL。PR の URL はこの下の /<owner>/<repo>/pull/<番号> の形で受け付ける。
 GITHUB_WEB_URL = (

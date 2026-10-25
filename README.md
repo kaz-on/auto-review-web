@@ -4,7 +4,7 @@ LAN 内の PC からブラウザで使える、[Codex CLI](https://github.com/op
 
 Codex の実行には OpenAI の API キーが必要で、レビューのたびに API 料金がかかる。
 
-レビューの対象は GitHub（github.com）のプルリクエストと、GitHub 互換の REST API を持つセルフホストのサービスのプルリクエスト（下記「GitHub 互換のサービス」）。GitLab のリポジトリや、PR になっていないブランチやコミットはレビューできない。GitHub Enterprise Server は互換のサービスと同じ設定で動く見込みだが、確かめていない。
+レビューの対象は、GitHub（github.com）のプルリクエスト、GitHub 互換の REST API を持つセルフホストのサービスのプルリクエスト（下記「GitHub 互換のサービス」）、GitLab のマージリクエスト（下記「GitLab」）。1 つのインスタンスで扱えるのはこのうち 1 つのサービスだけ。PR / MR になっていないブランチやコミットはレビューできない。GitHub Enterprise Server は互換のサービスと同じ設定で動く見込みだが、確かめていない。
 
 このアプリケーションは Claude Code を利用して作成されている。
 
@@ -154,6 +154,9 @@ python3 -m venv .venv
 | `GITHUB_APP_PRIVATE_KEY_PATH` | （空） | `app` モードの秘密鍵ファイル |
 | `GITHUB_APP_INSTALLATION_ID` | （空） | 省略時は `REVIEW_OWNER` から自動解決。オーナーが複数なら指定できない |
 | `GITHUB_TOKEN_REFRESH_MARGIN` | `300` | トークン再発行の閾値（秒） |
+| `REVIEW_FORGE` | `github` | PR をホストするサービス（`github` = github.com と GitHub 互換のサービス / `gitlab` = GitLab） |
+| `GITLAB_URL` | （空） | `gitlab` のときの GitLab の URL |
+| `GITLAB_TOKEN` | （空） | `gitlab` のときのアクセストークン（上記「GitLab」） |
 | `GITHUB_WEB_URL` | `https://github.com` | PR をホストするサービスの URL（上記「GitHub 互換のサービス」）。github.com なら変更不要 |
 | `GITHUB_API_URL` | `https://api.github.com` | REST API のベース URL。github.com なら変更不要 |
 | `GITHUB_CLONE_URL` | `{web}/{owner}/{repo}.git` | clone URL の形。`{web}` は `GITHUB_WEB_URL` に置き換わる |
@@ -186,11 +189,29 @@ GITHUB_POST_MODE=issue_comment                       # レビュー API が無�
 GH_TOKEN=...                                         # 読み取りと PR へのコメントができるトークン
 ```
 
-- **認証**: `pat` モードだけ使える。public のリポジトリでも、PR への投稿にはトークンが要る。
+- **認証**: `pat` モード（`GH_TOKEN`）だけ使える。public のリポジトリでも、PR への投稿にはトークンが要る。
 - **git の認証**: github.com はユーザー名が `x-access-token` 固定で通るが、トークンの持ち主のアカウント名でないと通らないサービスがある。そのときは `GITHUB_GIT_USERNAME` にその名前を書く。
 - **投稿**: `pulls/{n}/reviews`（レビュー API）を持たないサービスでは `GITHUB_POST_MODE=issue_comment` にする。指摘をソース行へのコメントにはせず、本文全体を 1 件のコメント（`issues/{n}/comments`）として投稿する。
 - **必要な API**: `GET /repos/{owner}/{repo}/pulls/{n}` が `base.sha` / `head.sha` / `base.ref` を返すこと。マージしたあとも `base.sha` が PR の元の base のまま変わらないこと（変わると差分が空になる。[docs/design.md](docs/design.md#レビュー対象のコミット)）。
 - **git**: SHA を指定した fetch に応じること。プロトコル v2 でしか応じないサービスがあるので、アプリは fetch をプロトコル v2 に固定している。
+
+## GitLab
+
+GitLab（CE を含むセルフホストの GitLab）のマージリクエストをレビューするときは、`REVIEW_FORGE=gitlab` にする。GitHub の設定（`GITHUB_*` / `GH_TOKEN`）は使わない。
+
+```ini
+REVIEW_FORGE=gitlab
+GITLAB_URL=https://gitlab.example.com     # MR の URL はこの下の /<group>/<project>/-/merge_requests/<番号>
+GITLAB_TOKEN=glpat-...
+REVIEW_OWNER=my-group                      # グループのパス。サブグループも含む
+```
+
+- **トークン**: レビュー対象がすべて 1 つのトップレベルのグループ（とそのサブグループ）にあるなら、そのグループの**グループアクセストークン**を使う。ロールは **Reporter**、スコープは **`api` と `read_repository`**。投稿はトークンのボットの名前で行われる。複数のトップレベルのグループを `REVIEW_OWNER` に並べる場合は、それらすべてに Reporter で参加させた専用ユーザーのパーソナルアクセストークンを使う（アプリが持てるトークンは 1 つだけのため）。
+- **トークンの更新**: GitLab のトークンには有効期限がある。更新は「失効させて作り直す」ではなくローテーションで行う（グループアクセストークンを失効させるとボットのユーザーが消え、過去の投稿の名前が「Ghost User」になる）。トークンは起動時に読むので、更新したら再起動する。
+- **オーナー**: `REVIEW_OWNER` にはグループのパスを書く。そのグループの下のサブグループも許可する（`my-group` を書けば `my-group/sub/project` も通る）。サブグループだけを許可するときは `my-group/sub` と書く。
+- **投稿**: 指摘をソース行へのコメントにはせず、本文全体を MR へのコメント 1 件として投稿する。GitLab は単独の改行を改行として表示しないので、投稿するときだけ改行を明示する（DB の本文は変えない）。
+- **MR を作った直後**: GitLab が MR の差分を計算し終えるまではレビュー対象のコミットが分からないので、数秒待って取り直す。それでも取れなければエラーになるので、少し待ってからやり直す。
+- **変更の規模**: GitLab の API は追加・削除の行数を返さないので、集計の `pr_additions` / `pr_deletions` は空欄になる。`pr_changed_files` は入る（1000 件を超えると空欄）。
 
 ## 説明文の書式（`REVIEW_DESCRIPTION`）
 

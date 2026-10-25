@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import config, db, export, forge, github_auth, reviews, store
+from . import config, db, export, forge, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -37,7 +37,7 @@ def _job_public(job: store.Job) -> dict[str, Any]:
 def _check_review_owner() -> None:
     """REVIEW_OWNER の設定漏れを起動時のログで気付けるようにする。
 
-    _check_github_auth と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
+    _check_forge と同じ方針で、未設定でも起動は続ける。実際のレビュー投入時
     に parse_pr_url が画面へエラーを出す。
     """
     if config.REVIEW_OWNERS:
@@ -49,29 +49,24 @@ def _check_review_owner() -> None:
         print("[warn] REVIEW_OWNER が未設定です。レビューは実行できません。", flush=True)
 
 
-def _check_github_auth() -> None:
-    """認証設定の不備を起動時のログで気付けるようにする。
+def _check_forge() -> None:
+    """PR のホストと認証の設定の不備を起動時のログで気付けるようにする。
 
     ここでは設定の読み込みだけを行い、ネットワークアクセスはしない。不備があっても
     起動自体は続け、ジョブ実行時に画面へエラーを出す (UI には到達できた方が良い)。
     """
     try:
-        forge.get()
+        host = forge.get()
     except ReviewError as e:
         print(f"[warn] PR のホストの設定に問題があります: {e}", flush=True)
-    else:
-        print(
-            f"[info] PR のホスト: {config.GITHUB_WEB_URL} "
-            f"(投稿: {config.GITHUB_POST_MODE})",
-            flush=True,
-        )
+        return
+    print(f"[info] PR のホスト: {host.name} ({host.pr_url_pattern()})", flush=True)
     try:
-        for owner in config.REVIEW_OWNERS or ("",):
-            github_auth.get_provider(owner)
+        summary = host.auth_summary()
     except ReviewError as e:
-        print(f"[warn] GitHub 認証の設定に問題があります: {e}", flush=True)
+        print(f"[warn] {host.name} の認証の設定に問題があります: {e}", flush=True)
     else:
-        print(f"[info] GitHub 認証モード: {config.GITHUB_AUTH_MODE}", flush=True)
+        print(f"[info] {summary}", flush=True)
 
 
 def _check_codex_auth() -> None:
@@ -133,7 +128,7 @@ def create_app() -> Flask:
         print(f"[info] 期限切れのジョブを {pruned} 件履歴から削除しました。", flush=True)
 
     _check_review_owner()
-    _check_github_auth()
+    _check_forge()
     _check_codex_auth()
     worker.start()
 
