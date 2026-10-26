@@ -2,8 +2,6 @@
 
 LAN 内の PC からブラウザで使える、[Codex CLI](https://github.com/openai/codex)（OpenAI）による PR レビューの実行・投稿・集計ツール。
 
-Codex の実行には OpenAI の API キーが必要で、レビューのたびに API 料金がかかる。
-
 レビューの対象は、GitHub（github.com）のプルリクエスト、GitHub 互換の REST API を持つセルフホストのサービスのプルリクエスト（下記「GitHub 互換のサービス」）、GitLab のマージリクエスト（下記「GitLab」）。1 つのインスタンスで扱えるのはこのうち 1 つのサービスだけ。PR / MR になっていないブランチやコミットはレビューできない。GitHub Enterprise Server は互換のサービスと同じ設定で動く見込みだが、確かめていない。
 
 このアプリケーションは Claude Code を利用して作成されている。
@@ -26,7 +24,7 @@ Codex の実行には OpenAI の API キーが必要で、レビューのたび�
 
 ## セキュリティ上の注意
 
-**このツールには認証の仕組みがない。** 画面と API に届く人は誰でも、レビューの投入・PR への投稿・履歴の削除ができる。PR への投稿は設定した GitHub の認証情報（PAT ならそのアカウント）の名義で行われ、Codex の API 料金も設定したキーに課金される。
+**このツールには認証の仕組みがない。** 画面と API に届く人は誰でも、レビューの投入・PR への投稿・履歴の削除ができる。PR への投稿は設定した GitHub の認証情報（PAT ならそのアカウント）の名義で行われ、Codex の利用料金も設定した認証情報（API キーまたは access token）に課金される。
 
 - 信頼できる LAN 内だけで使い、インターネットには公開しない。外から使う場合は、認証付きのリバースプロキシや VPN の後ろに置く。
 - 既定では実行している PC 自身（`127.0.0.1`）からしか接続できない。LAN 内のほかの PC から使う場合は `REVIEW_HOST=0.0.0.0` にする（docker compose でもホストで直接起動する場合でも同じ）。
@@ -185,6 +183,34 @@ python3 -m venv .venv
 .venv/bin/python -m webreview
 ```
 
+## バックアップ
+
+残しておくべきデータは SQLite の DB（ジョブ履歴・レビュー本文・指摘・PR タイトル）。クローンしたリポジトリは次のレビューで取り直すので要らない。codex の生ログは調査用で、無くても画面と集計には影響しない。`.env` の設定値は控えておくとよいが、トークンや秘密鍵は再発行できるので、バックアップに含めるかは運用に合わせる。
+
+DB は WAL モードで動いているので、ファイルをそのままコピーすると書き込み途中の内容を取りこぼすことがある。SQLite のバックアップ API を使えば、起動したままでも一貫した状態で書き出せる。
+
+Docker Compose の場合（DB はコンテナ内の `/data/review_logs/review.db`）:
+
+```bash
+docker compose exec webreview python -c "import sqlite3; d = sqlite3.connect('/tmp/review.db'); sqlite3.connect('/data/review_logs/review.db').backup(d); d.close()"
+docker compose cp webreview:/tmp/review.db ./review-backup.db
+```
+
+ホストで直接起動している場合（DB は `REVIEW_DB_PATH`、既定 `data/review.db`）:
+
+```bash
+python3 -c "import sqlite3; d = sqlite3.connect('review-backup.db'); sqlite3.connect('data/review.db').backup(d); d.close()"
+```
+
+戻すときは、アプリを止めてから DB を置き換え、同じ場所にある `review.db-wal` / `review.db-shm` があれば消す。Docker Compose の場合:
+
+```bash
+docker compose stop
+docker compose run --rm --no-deps -v "$PWD/review-backup.db:/restore.db:ro" webreview \
+  sh -c 'rm -f /data/review_logs/review.db-wal /data/review_logs/review.db-shm && cp /restore.db /data/review_logs/review.db'
+docker compose start
+```
+
 ## レビュー対象のオーナー（`REVIEW_OWNER`）
 
 `REVIEW_OWNER` にはレビューを許可するオーナーを書く。GitHub では Organization 名または個人アカウント名、GitLab ではグループのパス。`REVIEW_OWNER=team-a,team-b` のようにカンマ区切りで複数書ける。オーナー名は完全一致で照合する（大文字小文字も区別する）。ただし GitLab では、書いたグループの下のサブグループも許可する（上記「GitLab」）。
@@ -327,6 +353,12 @@ codex の既定のレビュー指針は、指摘を実際のバグに絞り、�
 - このアプリがプロンプトに足す指示（品質改善の指摘）は `AGENTS.md` より優先される。
 - 読まれるのは PR の head のコミットにある `AGENTS.md` なので、PR の中で `AGENTS.md` を変更すると、その PR 自身のレビューにも反映される。
 - `AGENTS.md` は codex がレビュー以外の作業でも読むので、レビューだけに関わる要件は見出しを分けて書くとよい。
+
+### PR ごとの観点
+
+PR のタイトルと説明文（GitLab では MR の説明）も codex に渡している。その PR だけに関わる指示は、PR の説明に書くとよい。たとえば変更の意図、重点的に見てほしい箇所、意図して変えた仕様（指摘しなくてよいこと）などを書いておくと、レビューに反映される。
+
+説明文はレビューを始めるときに取得するので、書き直したらレビューを投入し直す。
 
 ## ドキュメント
 
