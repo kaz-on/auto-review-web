@@ -18,11 +18,11 @@ codex の本文には 2 種類のファイルの参照が出てくる。
 
 from __future__ import annotations
 
-import posixpath
 import re
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Callable
 from urllib.parse import unquote
+
+from .paths import Roots, inside, is_windows_absolute, normalize_roots, relative_to_roots
 
 # (リポジトリからの相対パス, 開始行, 終了行) から blob の URL を作る。行が無ければ None。
 BlobUrl = Callable[[str, "int | None", "int | None"], str]
@@ -34,17 +34,19 @@ _CODE_SPAN_RE = re.compile(r"(`+)(.+?)\1")
 _PATH_CHARS = r"[^\s:()\[\]`'\"<>#、。，．）（]+"
 _LINE_RANGE = r"(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?"
 _LINK_RE = re.compile(r"\[(?P<text>[^\]\n]*)\]\((?P<target>[^)\s]+)\)")
+# "/C:/work/..." のように、Windows のパスを URL のパスの形で書いたもの。
+_SLASHED_DRIVE_RE = re.compile(r"^/[A-Za-z]:[\\/]")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _LINE_ANCHOR_RE = re.compile(r"^L(?P<start>\d+)(?:-L?(?P<end>\d+))?$")
 
 
-def linkify(text: str, roots: Path | Sequence[Path], blob_url: BlobUrl | None) -> str:
+def linkify(text: str, roots: Roots, blob_url: BlobUrl | None) -> str:
     """text の中のファイルの参照を blob へのリンクにする。
 
     roots は codex が動いた作業ツリーの候補。blob_url が None (レビューしたコミットが
     分からない古いレビュー) なら、絶対パスを相対パスに直すだけにする。
     """
-    rewriter = _Rewriter([roots] if isinstance(roots, Path) else roots, blob_url)
+    rewriter = _Rewriter(roots, blob_url)
     lines = text.split("\n")
     in_fence = False
     for i, line in enumerate(lines):
@@ -56,16 +58,13 @@ def linkify(text: str, roots: Path | Sequence[Path], blob_url: BlobUrl | None) -
 
 
 class _Rewriter:
-    def __init__(self, roots: Sequence[Path], blob_url: BlobUrl | None):
-        # 長いルートから試す。オーナーを固定していた頃のルート (WORK/<repo>) は、
-        # オーナーとリポジトリが同名だと今のルート (WORK/<owner>/<repo>) の先頭に一致する。
-        self._roots = sorted(
-            {posixpath.normpath(str(root)) for root in roots}, key=len, reverse=True
-        )
+    def __init__(self, roots: Roots, blob_url: BlobUrl | None):
+        # 長いルートから試す (正規表現の選択肢も前から一致を試す)。
+        self._roots = normalize_roots(roots)
         self._blob_url = blob_url
-        alternatives = "|".join(re.escape(root) for root in self._roots)
+        alternatives = "|".join(_root_pattern(root) for root in self._roots)
         self._abs_re = (
-            re.compile(rf"(?:{alternatives})/(?P<path>{_PATH_CHARS}){_LINE_RANGE}")
+            re.compile(rf"(?:{alternatives})(?P<path>{_PATH_CHARS}){_LINE_RANGE}")
             if self._roots
             else None
         )
@@ -139,16 +138,19 @@ class _Rewriter:
         if self._blob_url is None or "?" in target:
             return None
         path, _, fragment = target.partition("#")
-        if not path or target.startswith("//") or _SCHEME_RE.match(path):
-            return None
         # リンク先は URL なので、空白や日本語はエンコードされている。リポジトリの
         # パスとして扱うためにデコードする (URL にするときに blob_url がエンコードし直す)。
         path = unquote(path)
-        if path.startswith("/"):
+        if _SLASHED_DRIVE_RE.match(path):
+            path = path[1:]
+        if is_windows_absolute(path) or (path.startswith("/") and not path.startswith("//")):
             # 作業ツリーの絶対パスだけを扱う。それ以外の "/..." は何を指すか分からない。
-            relative = self._under_root(path)
+            # "C:" は URL のスキームの形でもあるので、スキームより先に見る。
+            relative = relative_to_roots(path, self._roots)
+        elif not path or target.startswith("//") or _SCHEME_RE.match(path):
+            return None
         else:
-            relative = _inside(path)
+            relative = inside(path)
         if relative is None:
             return None
         anchor = _LINE_ANCHOR_RE.match(fragment)
@@ -158,20 +160,16 @@ class _Rewriter:
         url = self._blob_url(relative, None, None)
         return f"{url}#{fragment}" if fragment else url
 
-    def _under_root(self, path: str) -> str | None:
-        normalized = posixpath.normpath(path)
-        for root in self._roots:
-            if normalized.startswith(root + "/"):
-                return _inside(normalized[len(root) + 1:])
-        return None
 
+def _root_pattern(root: str) -> str:
+    """ルートとその直後の区切りに一致する正規表現。
 
-def _inside(path: str) -> str | None:
-    """リポジトリのルートからの相対パスに整える。ルートの外を指せば None。"""
-    normalized = posixpath.normpath(path)
-    if normalized in (".", "..") or normalized.startswith(("../", "/")):
-        return None
-    return normalized
+    Windows のルートは区切りの "\\" と "/" を区別せず、大文字小文字も区別しない。
+    """
+    if not is_windows_absolute(root):
+        return re.escape(root.rstrip("/")) + "/"
+    parts = re.split(r"[\\/]", root.rstrip("\\/"))
+    return "(?i:" + r"[\\/]".join(map(re.escape, parts)) + r"[\\/])"
 
 
 def _parse_absolute(m: re.Match[str]) -> tuple[str, str, str] | None:
@@ -181,11 +179,14 @@ def _parse_absolute(m: re.Match[str]) -> tuple[str, str, str] | None:
     ". ," などを文の区切りとみなして分ける。
     """
     path = m.group("path")
+    if is_windows_absolute(m.group(0)):
+        # Windows のルートの下なら "\" は区切り。
+        path = path.replace("\\", "/")
     lines = m.group(0)[m.end("path") - m.start():]
     trailing = ""
     if not lines:
         path, trailing = _split_trailing(path)
-    relative = _inside(path)
+    relative = inside(path)
     if relative is None:
         return None
     return relative, relative + lines, trailing

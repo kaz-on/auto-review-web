@@ -199,3 +199,35 @@ def test_読み取った指摘は行コメントの形に直せる():
 
     assert (finding.path, finding.start_line, finding.end_line) == ("store/orders.py", 57, 58)
     assert finding.title == item.title
+
+
+# --- Windows で動かしたとき ---------------------------------------------------
+WIN_REPO = Path(r"C:\work\my-repo")
+
+
+def test_windows_の作業ツリーのパスを_スラッシュ区切りの相対パスにする():
+    """行コメントの path は "/" 区切りでないと GitHub が解決できない。"""
+    _, found = findings.extract(r"- 指摘 — C:\work\my-repo\src\a.py:1" + "\n", WIN_REPO)
+
+    assert found[0].path == "src/a.py"
+
+
+def test_windows_のパスは大文字小文字と区切りの違いを吸収する():
+    _, found = findings.extract("- 指摘 — c:/Work/my-repo/src/a.py:1\n", WIN_REPO)
+
+    assert found[0].path == "src/a.py"
+
+
+def test_windows_の相対パスも_スラッシュ区切りにする():
+    _, found = findings.extract(r"- 指摘 — src\a.py:1" + "\n", WIN_REPO)
+
+    assert found[0].path == "src/a.py"
+
+
+def test_windows_でも作業ツリーの外を指すパスは本文に残す():
+    body = r"- [P1] 指摘 — C:\Windows\system.ini:1" + "\n  説明\n"
+
+    remaining, found = findings.extract(body, WIN_REPO)
+
+    assert found == []
+    assert remaining == body.strip()

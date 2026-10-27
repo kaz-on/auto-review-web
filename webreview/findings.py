@@ -11,8 +11,8 @@ codex の出力は自由記述なので、書式が読み取れたものだけ�
 パスは codex が動いた作業ツリーの絶対パスで出るため、リポジトリのルート
 (REVIEW_WORK_PATH/<owner>/<repo>) からの相対パスに直す。オーナーを 1 つに固定して
 いた頃のレビューは REVIEW_WORK_PATH/<repo> で動いているので、ルートの候補は複数
-受け取り、最初に直せたもので解決する。直せないパスは GitHub 側でも解決できない
-(422 になる) ので、行コメントにはせず本文に残す。
+受け取り、長いものから試して最初に直せたもので解決する (paths)。直せないパスは
+GitHub 側でも解決できない (422 になる) ので、行コメントにはせず本文に残す。
 
 集計 (export) は同じ読み取り方 (parse) で指摘を数える。パスの解決は投稿のための
 もので、指摘であるかどうかには関わらない。
@@ -20,17 +20,13 @@ codex の出力は自由記述なので、書式が読み取れたものだけ�
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Any, Union
+from typing import Any
+
+from .paths import Roots, inside, is_windows_absolute, normalize_roots, relative_to_roots
 
 __all__ = ["Finding", "Item", "Parsed", "extract", "parse"]
-
-# 作業ツリーのルート。候補が複数あるときは前から順に試す。
-Roots = Union[Path, Sequence[Path]]
 
 # 箇条書きの先頭行。優先度と行範囲は省略されることがある。
 # タイトルは貪欲に取り、行末の "パス:行" が成立する最後の区切りで切る
@@ -214,21 +210,13 @@ def _relative_path(raw: str, roots: Roots) -> str | None:
     if not text:
         return None
 
-    path = os.path.normpath(text)
-    if not os.path.isabs(path):
-        return _inside(path)
-    for root in [roots] if isinstance(roots, Path) else roots:
-        relative = _inside(os.path.relpath(path, os.path.normpath(str(root))))
-        if relative is not None:
-            return relative
-    return None
-
-
-def _inside(path: str) -> str | None:
-    """ルートの外を指すパスは PR の差分に対応しないので None にする。"""
-    if path.startswith("..") or os.path.isabs(path) or path == ".":
-        return None
-    return path
+    normalized = normalize_roots(roots)
+    if is_windows_absolute(text) or text.startswith("/"):
+        return relative_to_roots(text, normalized)
+    if any(is_windows_absolute(root) for root in normalized):
+        # Windows で動いたレビューなら "\" は区切り。
+        text = text.replace("\\", "/")
+    return inside(text)
 
 
 def _tidy(lines: list[str], dropped: bool) -> str:

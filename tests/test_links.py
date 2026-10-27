@@ -184,3 +184,64 @@ def test_レビューしたコミットが分からなければ相対パスに�
 
 def test_ルートを_1_つだけ渡してもよい():
     assert linkify("/work/org/repo/a.py:3", ROOT, None) == "a.py:3"
+
+
+# --- Windows で動かしたとき ---------------------------------------------------
+WIN_ROOT = Path(r"C:\work\org\repo")
+WIN_ROOTS = (WIN_ROOT, Path(r"C:\work\repo"))
+
+
+def test_windows_の作業ツリーのパスを_スラッシュ区切りのリンクにする():
+    text = r"- [P1] 合計を誤る — C:\work\org\repo\src\a.py:40-45"
+
+    assert linkify(text, WIN_ROOTS, blob) == (
+        "- [P1] 合計を誤る — [src/a.py:40-45](https://host/blob/SHA/src/a.py#40-45)"
+    )
+
+
+@pytest.mark.parametrize("path", [
+    "C:/work/org/repo/src/a.py",
+    r"c:\Work\org\repo\src\a.py",
+    r"C:\work\org\repo/src\a.py",
+])
+def test_windows_のパスは区切りと大文字小文字の違いを吸収する(path):
+    assert linkify(f"{path}:3", WIN_ROOTS, blob) == (
+        "[src/a.py:3](https://host/blob/SHA/src/a.py#3-3)"
+    )
+
+
+def test_windows_でもオーナーを固定していた頃の作業ツリーのパスを直す():
+    assert linkify(r"C:\work\repo\a.py の説明。", WIN_ROOTS, blob) == (
+        "[a.py](https://host/blob/SHA/a.py) の説明。"
+    )
+
+
+@pytest.mark.parametrize("text", [
+    r"C:\work\other\a.py:3",
+    r"C:\work\org\repo\..\other\a.py:3",
+    r"D:\work\org\repo\a.py:3",
+])
+def test_windows_でも作業ツリーの外のパスは触らない(text):
+    assert linkify(text, WIN_ROOTS, blob) == text
+
+
+@pytest.mark.parametrize("target", [
+    r"C:\work\org\repo\src\a.py#L3",
+    "C:/work/org/repo/src/a.py#L3",
+    "/C:/work/org/repo/src/a.py#L3",
+    "C:%5Cwork%5Corg%5Crepo%5Csrc%5Ca.py#L3",
+])
+def test_windows_の作業ツリーのパスを指すリンクも直す(target):
+    assert linkify(f"[a]({target})", WIN_ROOTS, blob) == (
+        "[a](https://host/blob/SHA/src/a.py#3-3)"
+    )
+
+
+def test_windows_の作業ツリーの外を指すリンクは触らない():
+    link = r"[外](C:\other\a.py)"
+
+    assert linkify(link, WIN_ROOTS, blob) == link
+
+
+def test_windows_のパスもコードの中は相対パスに直すだけ():
+    assert linkify(r"`C:\work\org\repo\src\a.py:3`", WIN_ROOTS, blob) == "`src/a.py:3`"
