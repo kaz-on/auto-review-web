@@ -126,7 +126,9 @@ class GitHubForge:
         )
 
         def linked(text: str) -> str:
-            return links.linkify(text, roots, blob)
+            # 単独の改行を空白として表示する互換のサービスがあるので、指摘の見出しの
+            # 直後の改行を明示する。見出しのパスはリンクにすると形が変わるので先に付ける。
+            return links.linkify(findings.break_headings(text), roots, blob)
 
         if self._post_mode == "issue_comment":
             progress(f"PR #{number} にコメントとして投稿します...")

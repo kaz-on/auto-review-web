@@ -16,6 +16,10 @@ GitHub 側でも解決できない (422 になる) ので、行コメントに�
 
 集計 (export) は同じ読み取り方 (parse) で指摘を数える。パスの解決は投稿のための
 もので、指摘であるかどうかには関わらない。
+
+この箇条書きは codex の出力そのものではなく、codex CLI が JSON の指摘から組み立てた
+もの (codex-rs/protocol/src/review_format.rs)。見出しの直後に説明を改行 1 つで続ける
+ので、単独の改行を空白として表示するサービスでは 1 行につながる (break_headings)。
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from typing import Any
 
 from .paths import Roots, inside, is_windows_absolute, normalize_roots, relative_to_roots
 
-__all__ = ["Finding", "Item", "Parsed", "extract", "parse"]
+__all__ = ["Finding", "Item", "Parsed", "break_headings", "extract", "parse"]
 
 # 箇条書きの先頭行。優先度と行範囲は省略されることがある。
 # タイトルは貪欲に取り、行末の "パス:行" が成立する最後の区切りで切る
@@ -144,6 +148,20 @@ def extract(body: str, roots: Roots) -> tuple[str, list[Finding]]:
             findings.append(finding)
 
     return _tidy(kept, dropped=bool(findings)), findings
+
+
+def break_headings(body: str) -> str:
+    """指摘の見出しの行末に Markdown の改行 (空白 2 つ) を付け、説明と分けて表示させる。
+
+    GitLab や、設定によっては GitHub 互換のサービス (Gitea など) は単独の改行を
+    空白として表示する。github.com はもともと改行として表示するので見た目は変わらない。
+    説明は codex が Markdown として書いたものなので、その中には手を加えない。
+    """
+    lines = body.split("\n")
+    for i, line in enumerate(lines[:-1]):
+        if _HEADING_RE.match(line) and lines[i + 1].strip() and not line.endswith("  "):
+            lines[i] = line + "  "
+    return "\n".join(lines)
 
 
 def _blocks(lines: list[str]) -> list[list[str]]:

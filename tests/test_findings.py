@@ -231,3 +231,27 @@ def test_windows_でも作業ツリーの外を指すパスは本文に残す():
 
     assert found == []
     assert remaining == body.strip()
+
+
+# --- 見出しの直後の改行 -------------------------------------------------------
+def test_見出しの直後にだけ改行を明示する():
+    """説明は codex が Markdown として書いたものなので、中の改行には手を加えない。"""
+    body = (
+        "要約の 1 行目\n要約の 2 行目\n\n"
+        "Full review comments:\n\n"
+        "- [P1] 指摘 — /work/my-repo/a.py:1-2\n"
+        "  説明の 1 行目\n  説明の 2 行目\n\n"
+        "  ```sh\n  make build \\\n    --release\n  ```\n\n"
+        "- [P2] 説明の無い指摘 — /work/my-repo/b.py:3-3\n\n"
+        "- [P3] 最後の指摘 — /work/my-repo/c.py:4-4"
+    )
+
+    assert findings.break_headings(body) == body.replace(
+        "a.py:1-2\n", "a.py:1-2  \n"
+    )
+
+
+def test_既に改行を明示した見出しには重ねない():
+    body = "- 指摘 — /work/my-repo/a.py:1  \n  説明"
+
+    assert findings.break_headings(body) == body

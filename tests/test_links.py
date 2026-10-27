@@ -245,3 +245,9 @@ def test_windows_の作業ツリーの外を指すリンクは触らない():
 
 def test_windows_のパスもコードの中は相対パスに直すだけ():
     assert linkify(r"`C:\work\org\repo\src\a.py:3`", WIN_ROOTS, blob) == "`src/a.py:3`"
+
+
+def test_引用の中のコードブロックも相対パスに直すだけ():
+    text = "> ```\n> /work/org/repo/a.py:3\n> ```"
+
+    assert linkify(text, ROOTS, blob) == "> ```\n> a.py:3\n> ```"

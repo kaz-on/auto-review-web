@@ -27,7 +27,8 @@ from .paths import Roots, inside, is_windows_absolute, normalize_roots, relative
 # (リポジトリからの相対パス, 開始行, 終了行) から blob の URL を作る。行が無ければ None。
 BlobUrl = Callable[[str, "int | None", "int | None"], str]
 
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# コードブロックの開始・終了の行。引用の中 ("> ```sh") のものも含める。
+_FENCE_RE = re.compile(r"^(?:\s*>)*\s*(```|~~~)")
 _CODE_SPAN_RE = re.compile(r"(`+)(.+?)\1")
 # パスに使える文字。空白や括弧、引用符、日本語の句読点で区切る。"#" はリンクの
 # アンカー (a.py#L3) の区切りとして扱い、パスには含めない。

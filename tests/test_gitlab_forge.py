@@ -16,7 +16,7 @@ import pytest
 
 from webreview import config, forge, gitlab_api, gitlab_forge, reviews
 from webreview.errors import ReviewError
-from webreview.gitlab_forge import GitLabForge, _hard_breaks
+from webreview.gitlab_forge import GitLabForge
 from webreview.review import parse_pr_url
 
 WEB = "http://gitlab.example.local:8929"
@@ -241,18 +241,6 @@ def test_本文のパスと相対リンクをコミットの_blob_へのリン�
         f"- [P1] 指摘 — [a.py:3-4]({web}/a.py#L3-4)  \n"
         f"  [CR-004]({web}/AGENTS.md#L14-15) に反します。"
     )
-
-
-def test_改行の明示は段落の中の改行だけに付ける():
-    text = "1 行目\n2 行目\n\n段落\n\n```\nx = 1\ny = 2\n```\n末尾"
-
-    assert _hard_breaks(text) == (
-        "1 行目  \n2 行目\n\n段落\n\n```\nx = 1\ny = 2\n```\n末尾"
-    )
-
-
-def test_既に改行を明示した行には重ねない():
-    assert _hard_breaks("a  \nb") == "a  \nb"
 
 
 # --- API ラッパ ---------------------------------------------------------------

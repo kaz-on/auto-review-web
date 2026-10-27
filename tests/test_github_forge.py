@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from webreview import config, github_api, github_auth, reviews
+from webreview import config, findings, github_api, github_auth, reviews
 from webreview.errors import ReviewError
 from webreview.github_forge import GitHubForge
 from webreview.links import linkify
@@ -137,8 +137,9 @@ def test_レビュー_api_が無ければ本文全体を_1_件のコメントに
 
     compat.post_review("o", "r", 1, review, (), lines.append)
 
-    # 指摘を行コメントに抜き出さず、ヘッダ付きの本文をそのまま送る。
-    assert posted == [("o", "o", "r", 1, reviews.render_body(review))]
+    # 指摘を行コメントに抜き出さず、ヘッダ付きの本文をそのまま送る (改行は明示する)。
+    assert posted == [("o", "o", "r", 1, findings.break_headings(reviews.render_body(review)))]
+    assert posted[0][-1].endswith("- [P1] 指摘 — /work/o/r/a.py:3  \n  説明。\n")
     assert any("コメントとして投稿" in line for line in lines)
 
 
@@ -192,8 +193,9 @@ def test_互換のサービスでは本文のパスをコミットの_blob_へ�
     compat.post_review("o", "r", 1, review, (root,), lambda _l: None)
 
     web = "http://git.example.local:8888/o/r/blob/abc"
+    # リンクにしたうえで、段落の中の改行を明示する。
     assert posted[0].endswith(
-        f"- [P1] 指摘 — [a.py:3-4]({web}/a.py#L3-L4)\n"
+        f"- [P1] 指摘 — [a.py:3-4]({web}/a.py#L3-L4)  \n"
         f"  [CR-004]({web}/AGENTS.md#L14-L15) に反します。\n"
     )
 

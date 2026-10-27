@@ -11,7 +11,8 @@ github_forge との主な違い:
 * 投稿は MR へのコメント (note) 1 件だけ。行コメント (discussions) は位置の指定が
   複雑なうえ 1 件ずつ投稿するので一部だけ失敗しうるため、まだ扱わない。
 * GitLab の Markdown は単独の改行を改行として表示しないので、投稿するときだけ
-  改行を明示する (_hard_breaks)。ファイルへのリンク (links) の行範囲は "#L40-45"。
+  指摘の見出しの直後の改行を明示する (findings.break_headings)。
+  ファイルへのリンク (links) の行範囲は "#L40-45"。
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import time
 from functools import partial
 from urllib.parse import quote, urlsplit
 
-from . import config, gitlab_api, links, reviews
+from . import config, findings, gitlab_api, links, reviews
 from .errors import ReviewError
 from .findings import Roots
 from .forge import GitCredential, ProgressFn, PullRequest
@@ -151,44 +152,14 @@ class GitLabForge:
             if review.head_commit
             else None
         )
-        body = links.linkify(reviews.render_body(review), roots, blob)
+        # 見出しのパスはリンクにすると形が変わるので、改行を先に付ける。
+        body = findings.break_headings(reviews.render_body(review))
+        body = links.linkify(body, roots, blob)
         progress(f"MR !{number} にコメントとして投稿します...")
-        gitlab_api.create_note(_token(), owner, repo, number, _hard_breaks(body))
+        gitlab_api.create_note(_token(), owner, repo, number, body)
 
 
 def _token() -> str:
     if not config.GITLAB_TOKEN:
         raise ReviewError("GITLAB_TOKEN が設定されていません。")
     return config.GITLAB_TOKEN
-
-
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
-
-
-def _hard_breaks(text: str) -> str:
-    """段落の中の単独の改行を、Markdown の改行 (行末の空白 2 つ) にする。
-
-    GitLab は単独の改行を空白として表示するので、codex の箇条書きの見出しと説明が
-    1 行につながってしまう。行末の "\\" は段落の最後に付くと文字として残るが、
-    空白 2 つなら段落の最後でも何も表示されないので、こちらを使う。
-    コードブロックの中は表示が変わらないうえ、コピーしたときに空白が混ざるので触らない。
-    """
-    lines = text.split("\n")
-    in_fence = False
-    out: list[str] = []
-    for i, line in enumerate(lines):
-        if _FENCE_RE.match(line):
-            in_fence = not in_fence
-            out.append(line)
-            continue
-        following = lines[i + 1] if i + 1 < len(lines) else ""
-        if (
-            not in_fence
-            and line.strip()
-            and following.strip()
-            and not _FENCE_RE.match(following)
-            and not line.endswith("  ")
-        ):
-            line += "  "
-        out.append(line)
-    return "\n".join(out)
