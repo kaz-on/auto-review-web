@@ -10,7 +10,9 @@ installation access token は 1 時間で失効するため、**GitHub にアク
 
 ## codex に固定で渡すオプション
 
-`codex` にはモデルや reasoning effort などの設定（README の「設定」）に加えて `--sandbox read-only --ask-for-approval never --config model_reasoning_summary=none` を固定で渡す。非対話実行で承認待ちに固まらず、作業ツリーを書き換えず、推論サマリをレビュー本文に混ぜないため。
+`codex` にはモデルや reasoning effort などの設定（README の「設定」）に加えて `--sandbox workspace-write --config sandbox_workspace_write.network_access=false --ask-for-approval never --config model_reasoning_summary=none` を固定で渡す。非対話実行で承認待ちに固まらず、推論サマリをレビュー本文に混ぜないため。
+
+サンドボックスを read-only ではなく workspace-write にするのは、codex がレビュー中にコードの動作確認をしようとするため。read-only でも実行自体は防げず（コンパイラの出力をメモリ上の fd に書いて実行するといった回りくどい方法を取る）、書き込みを禁じても安全性はほとんど増えない。作業ツリーはレビュー専用の clone で、`.git` は codex が書き込み禁止にする（アプリが次に動かす git に hook や設定を仕込まれない）。ネットワークは既定でも拒否だが、`~/.codex/config.toml` の設定に左右されないよう明示する。`/tmp` などの書き込み設定は既定とユーザー設定に任せる。codex が書いたファイルは ignore 対象も含めて次回の `git clean -ffdx` で消す。
 
 ## 同時実行の扱い
 
@@ -97,4 +99,4 @@ GitLab では、本文全体を MR へのコメント（note）1 件として投
 - ログ世代（rev）が既に存在する場合は、新しい rev を自動採番する。
 - レビューはジョブ投入をもって実行する。
 - PR への投稿は既定では完了後に自動で行う。OFF の場合は「PR に投稿」ボタンで実行する。
-- 作業ツリーが dirty でも、毎回 PR のコミットへ `checkout --force` + `clean` して復帰する。
+- 作業ツリーが dirty でも、毎回 PR のコミットへ `checkout --force` + `clean -ffdx` して復帰する。

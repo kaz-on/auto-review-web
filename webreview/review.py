@@ -7,7 +7,7 @@
 * PR への投稿は Web UI 上の「投稿」操作で明示的に行う (post_review)。
 * 行コメントを GitHub が解決できなくても、本文だけの投稿に落として先へ進む。
 
-git の作業ツリーは毎回 PR のコミットへ checkout --force + clean するため、前回実行の
+git の作業ツリーは毎回 PR のコミットへ checkout --force + clean -x するため、前回実行の
 残骸があっても復帰できる。単一ワーカーで直列実行される前提なので、共有の
 作業ディレクトリに対する git 操作が競合することはない。
 
@@ -183,14 +183,20 @@ def _codex_env() -> dict[str, str]:
 def _codex_args(prompt: str) -> list[str]:
     """codex の起動引数を組み立てる。
 
-    Web からの非対話実行なので、承認待ちで止まったり作業ツリーを書き換えたりしない
-    設定を固定で渡す。推論サマリはレビュー本文に混ざるノイズなので抑制する。
+    Web からの非対話実行なので、承認待ちで止まらない設定を固定で渡す。サンドボックスは
+    workspace-write にして、レビュー中の動作確認で一時ファイルやビルド成果物を作業ツリーに
+    置けるようにする (read-only だと、codex はメモリ上の fd を使う回りくどい方法で
+    実行を試みる)。.git は codex が書き込み禁止にするので、次に動かす git に hook や
+    設定を仕込まれることはない。ネットワークは既定でも拒否だが、~/.codex/config.toml の
+    設定で開かないよう明示する。書き込んだものは次回の clean -ffdx で消える。
+    推論サマリはレビュー本文に混ざるノイズなので抑制する。
     """
     args = [config.CODEX_BIN, "--model", config.REVIEW_MODEL]
     if config.REVIEW_REASONING_EFFORT:
         args += ["--config", f"model_reasoning_effort={config.REVIEW_REASONING_EFFORT}"]
     args += [
-        "--sandbox", "read-only",
+        "--sandbox", "workspace-write",
+        "--config", "sandbox_workspace_write.network_access=false",
         "--ask-for-approval", "never",
         "--config", "model_reasoning_summary=none",
         "review", prompt,
@@ -336,9 +342,11 @@ def _checkout_pr(
     )
 
     # 前回実行の残骸があっても復帰できるよう、作業ツリーを強制的に合わせる。
+    # codex は作業ツリーに書き込めるので、ignore 対象のファイル (ビルド成果物など) も
+    # 消す — 残すと別の PR のレビューに持ち越される。
     _run([config.GIT_BIN, "checkout", "--force", "--detach", pull.head_sha],
          cwd=repo_path, progress=progress)
-    _run([config.GIT_BIN, "clean", "-ffd"], cwd=repo_path, progress=progress)
+    _run([config.GIT_BIN, "clean", "-ffdx"], cwd=repo_path, progress=progress)
     _run(
         [config.GIT_BIN, "submodule", "update", "--init", "--recursive", "--force"],
         cwd=repo_path, progress=progress, env=git_env,

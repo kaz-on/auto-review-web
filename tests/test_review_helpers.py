@@ -165,7 +165,7 @@ def test_tail_はファイルが無ければ空文字(tmp_path):
 
 
 # --- codex の起動引数 --------------------------------------------------------
-def test_codex_の引数に承認不要と読み取り専用サンドボックスを含める(monkeypatch):
+def test_codex_の引数に承認不要とネットワークなしのサンドボックスを含める(monkeypatch):
     monkeypatch.setattr(config, "CODEX_BIN", "codex")
     monkeypatch.setattr(config, "REVIEW_MODEL", "gpt-6.1-sol")
     monkeypatch.setattr(config, "REVIEW_REASONING_EFFORT", "high")
@@ -175,7 +175,8 @@ def test_codex_の引数に承認不要と読み取り専用サンドボック�
     assert args[0] == "codex"
     assert args[-2:] == ["review", "PROMPT"]
     assert "--config" in args and "model_reasoning_effort=high" in args
-    assert args[args.index("--sandbox") + 1] == "read-only"
+    assert args[args.index("--sandbox") + 1] == "workspace-write"
+    assert "sandbox_workspace_write.network_access=false" in args
     assert args[args.index("--ask-for-approval") + 1] == "never"
 
 
