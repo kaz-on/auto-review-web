@@ -152,7 +152,7 @@ class GitHubForge:
                 f"PR #{number} にレビューを投稿します "
                 f"({len(comments)} 件をソース行へのコメントにします)..."
             )
-            posted = self._post_with_comments(
+            rejected = self._post_with_comments(
                 owner,
                 repo,
                 number,
@@ -160,8 +160,10 @@ class GitHubForge:
                 comments,
                 review.head_commit,
             )
-            if posted:
+            if rejected is None:
                 return
+            # 何が解決できなかったか (パスか行か) を後から調べられるように残す。
+            progress(str(rejected))
             progress("行コメントを解決できなかったため、本文にまとめて投稿し直します。")
         else:
             progress(f"PR #{number} にレビューを投稿します...")
@@ -183,8 +185,8 @@ class GitHubForge:
         body: str,
         comments: list[dict],
         commit_id: str | None,
-    ) -> bool:
-        """行コメント付きで投稿する。GitHub が位置を解決できなければ False を返す。
+    ) -> github_api.ApiError | None:
+        """行コメント付きで投稿する。GitHub が位置を解決できなければそのエラーを返す。
 
         422 は差分に無いパスや行を指したときのもので (エラーは "Path could not be
         resolved" など)、投稿はまるごと行われていない。本文だけならまだ通るので、
@@ -203,8 +205,8 @@ class GitHubForge:
         except github_api.ApiError as e:
             if e.status != 422:
                 raise
-            return False
-        return True
+            return e
+        return None
 
 
 def _template_regex(template: str) -> re.Pattern[str]:

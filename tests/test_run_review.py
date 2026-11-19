@@ -303,6 +303,8 @@ def test_行コメントが弾かれたら本文にまとめて投稿し直す(c
     # 2 回目も commit_id を維持する。
     assert calls[1]["commit_id"] == "headcommit5678"
     assert any("投稿し直します" in line for line in lines)
+    # GitHub が返したエラーの内容も残す。
+    assert "Path could not be resolved" in lines
 
 
 def test_422_以外の失敗は投稿の失敗として伝える(capture_post, temp_paths):
