@@ -38,7 +38,7 @@ def _owners(value: str) -> tuple[str, ...]:
 REVIEW_OWNERS = _owners(os.environ.get("REVIEW_OWNER", ""))
 
 # codex に渡すレビューモデル。
-REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-6.1-sol")
+REVIEW_MODEL = os.environ.get("REVIEW_MODEL", "gpt-6.2-sol")
 
 # codex に渡す推論の深さ (model_reasoning_effort)。
 # 空にするとオプション自体を渡さず、モデル/codex 側の既定に従う。

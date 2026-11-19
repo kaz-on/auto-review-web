@@ -259,7 +259,7 @@ Codex の認証（`CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`）は上記「Codex 認
 | 環境変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `REVIEW_OWNER` | （空） | **必須。** 許可するリポジトリのオーナー（GitHub は Organization 名または個人アカウント名、GitLab はグループのパス）。カンマ区切りで複数指定できる（上記「レビュー対象のオーナー」） |
-| `REVIEW_MODEL` | `gpt-6.1-sol` | codex のレビューモデル |
+| `REVIEW_MODEL` | `gpt-6.2-sol` | codex のレビューモデル |
 | `REVIEW_REASONING_EFFORT` | `medium` | 推論の深さ（`minimal` / `low` / `medium` / `high`）。空でモデル既定 |
 | `REVIEW_DESCRIPTION` | （空） | 画面上部に表示する説明文（下記「説明文の書式」） |
 | `REVIEW_TIMEOUT` | `3600` | codex 1 回あたりの制限時間（秒）。`0` で無制限 |
