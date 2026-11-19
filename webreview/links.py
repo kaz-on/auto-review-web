@@ -30,11 +30,22 @@ BlobUrl = Callable[[str, "int | None", "int | None"], str]
 # コードブロックの開始・終了の行。引用の中 ("> ```sh") のものも含める。
 _FENCE_RE = re.compile(r"^(?:\s*>)*\s*(```|~~~)")
 _CODE_SPAN_RE = re.compile(r"(`+)(.+?)\1")
-# パスに使える文字。空白や括弧、引用符、日本語の句読点で区切る。"#" はリンクの
-# アンカー (a.py#L3) の区切りとして扱い、パスには含めない。
-_PATH_CHARS = r"[^\s:()\[\]`'\"<>#、。，．）（]+"
+# パスに使える文字。空白や引用符、日本語の句読点で区切る。"#" はリンクの
+# アンカー (a.py#L3) の区切りとして扱い、パスには含めない。括弧はディレクトリ名に
+# 使われる ("src/[id]/(group)/a.py") のでパスに含め、対応の取れない閉じ括弧
+# ("(/work/o/r/a.py)" の ")") で切る (_balanced_length)。
+_PATH_CHARS = r"[^\s:`'\"<>#、。，．）（]+"
 _LINE_RANGE = r"(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?"
-_LINK_RE = re.compile(r"\[(?P<text>[^\]\n]*)\]\((?P<target>[^)\s]+)\)")
+# Markdown のリンク。CommonMark と同じく、表示文字列の中の対応の取れた角括弧と、
+# リンク先の中の対応の取れた丸括弧を許す (どちらも 1 段の入れ子まで)。リンク先は
+# "<...>" で囲んだ形 (空白や括弧をそのまま書ける) も読む。
+_LINK_RE = re.compile(
+    r"\[(?P<text>(?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]"
+    r"\((?:<(?P<angled>[^<>\n]*)>|(?P<target>(?:[^()\s]|\([^()\s]*\))+))\)"
+)
+_CLOSING = {")": "(", "]": "["}
+# 本文に出すパスの中で、Markdown の書式として読まれてしまう文字。
+_MARKDOWN_SPECIAL_RE = re.compile(r"([\\`*_\[\]<>~|])")
 # "/C:/work/..." のように、Windows のパスを URL のパスの形で書いたもの。
 _SLASHED_DRIVE_RE = re.compile(r"^/[A-Za-z]:[\\/]")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -73,9 +84,13 @@ class _Rewriter:
     # --- 行の種類ごと ---------------------------------------------------------
     def code(self, text: str) -> str:
         """コードの中。リンクにできないので、絶対パスを相対パスに直すだけ。"""
-        if self._abs_re is None:
-            return text
-        return self._abs_re.sub(self._relative_text, text)
+        out: list[str] = []
+        pos = 0
+        while (path := self._find_absolute(text, pos)) is not None:
+            out.append(text[pos:path.start()] + path.label + path.trailing)
+            pos = path.end()
+        out.append(text[pos:])
+        return "".join(out)
 
     def line(self, text: str) -> str:
         """コードブロックの外の 1 行。
@@ -84,56 +99,66 @@ class _Rewriter:
         扱う。リンクの表示文字列にインラインコードが入ること (``[`a.py`](a.py)``)
         も、インラインコードの中にリンクの形が入ること (`` `[x](a.py)` ``) もあり、
         どちらかで先に切り分けると、もう一方が分断されて読めなくなる。
+
+        作業ツリーの絶対パスも同じように 1 つの単位として扱う。パスの中の
+        "[id](group)" がリンクの形に見えても、先に始まるパスのほうを取る。
         """
         out: list[str] = []
         pos = 0
         while True:
             link = _LINK_RE.search(text, pos)
             span = _CODE_SPAN_RE.search(text, pos)
-            m = min((x for x in (link, span) if x), key=lambda x: x.start(), default=None)
+            path = self._find_absolute(text, pos)
+            m = min(
+                (x for x in (link, span, path) if x),
+                key=lambda x: x.start(),
+                default=None,
+            )
             if m is None:
                 break
-            out.append(self._bare_paths(text[pos:m.start()]))
-            if m is link:
-                out.append(self._link(m.group("text"), m.group("target")))
+            out.append(text[pos:m.start()])
+            if isinstance(m, _AbsolutePath):
+                out.append(self._path_link(m))
+            elif m is link:
+                out.append(self._link(m))
             else:
                 out.append(m.group(1) + self.code(m.group(2)) + m.group(1))
             pos = m.end()
-        out.append(self._bare_paths(text[pos:]))
+        out.append(text[pos:])
         return "".join(out)
 
     # --- 置き換え ---------------------------------------------------------------
-    def _bare_paths(self, text: str) -> str:
+    def _find_absolute(self, text: str, pos: int) -> _AbsolutePath | None:
+        """text[pos:] で最初に現れる、作業ツリーの中を指す絶対パス。"""
         if self._abs_re is None:
-            return text
-        return self._abs_re.sub(self._path_link, text)
+            return None
+        while (m := self._abs_re.search(text, pos)) is not None:
+            parsed = _parse_absolute(m)
+            if parsed is not None:
+                return parsed
+            pos = m.end()
+        return None
 
-    def _path_link(self, m: re.Match[str]) -> str:
+    def _path_link(self, path: _AbsolutePath) -> str:
         """作業ツリーの絶対パス → [相対パス:行](blob の URL)。"""
-        parsed = _parse_absolute(m)
-        if parsed is None:
-            return m.group(0)
-        relative, label, trailing = parsed
+        # パスの "_" や "[" が強調やリンクの書式として読まれないようにする。
+        label = _MARKDOWN_SPECIAL_RE.sub(r"\\\1", path.label)
         if self._blob_url is None:
-            return label + trailing
-        start, end = _lines(m.group("start"), m.group("end"))
+            return label + path.trailing
+        url = _markdown_url(self._blob_url(path.relative, path.first, path.last))
         # 文末のピリオドなどはリンクの外に出す。
-        return f"[{label}]({self._blob_url(relative, start, end)}){trailing}"
+        return f"[{label}]({url}){path.trailing}"
 
-    def _relative_text(self, m: re.Match[str]) -> str:
-        """絶対パスの部分だけを相対パスに直した文字列。"""
-        parsed = _parse_absolute(m)
-        if parsed is None:
-            return m.group(0)
-        _relative, label, trailing = parsed
-        return label + trailing
-
-    def _link(self, label: str, target: str) -> str:
+    def _link(self, m: re.Match[str]) -> str:
         """Markdown のリンク。リポジトリ内のファイルを指していれば blob の URL にする。"""
+        angled = m.group("angled")
+        target = angled if angled is not None else m.group("target")
         # リンクの中にリンクは置けないので、表示文字列の絶対パスは相対に直すだけ。
-        label = self.code(label)
+        label = self.code(m.group("text"))
         url = self._target(target)
-        return f"[{label}]({url or target})"
+        if url is None:
+            return f"[{label}]({target})" if angled is None else f"[{label}](<{target}>)"
+        return f"[{label}]({_markdown_url(url)})"
 
     def _target(self, target: str) -> str | None:
         if self._blob_url is None or "?" in target:
@@ -173,24 +198,79 @@ def _root_pattern(root: str) -> str:
     return "(?i:" + r"[\\/]".join(map(re.escape, parts)) + r"[\\/])"
 
 
-def _parse_absolute(m: re.Match[str]) -> tuple[str, str, str] | None:
-    """絶対パスの一致を (相対パス, 表示する文字列, 後ろに出す文の区切り) にする。
+class _AbsolutePath:
+    """本文の中の、作業ツリーの絶対パスの 1 か所。
 
-    表示する文字列は "相対パス:行範囲"。行範囲が無いときだけ、パスの末尾の
+    start() と end() は本文の中の範囲 (後ろに出す文の区切りも含む)。label は
+    表示する "相対パス:行範囲"、trailing はパスの末尾から分けた ". ," などの文の区切り。
+    """
+
+    def __init__(
+        self, start: int, end: int, relative: str, label: str, trailing: str,
+        first: int | None, last: int | None,
+    ):
+        self._start = start
+        self._end = end
+        self.relative = relative
+        self.label = label
+        self.trailing = trailing
+        self.first = first
+        self.last = last
+
+    def start(self) -> int:
+        return self._start
+
+    def end(self) -> int:
+        return self._end
+
+
+def _parse_absolute(m: re.Match[str]) -> _AbsolutePath | None:
+    """絶対パスの一致を読む。作業ツリーの外を指せば None。
+
+    パスに対応の取れない閉じ括弧があれば、その手前までをパスとみなす
+    ("(/work/o/r/a.py)" の ")" は文の括弧)。行範囲が無いときだけ、パスの末尾の
     ". ," などを文の区切りとみなして分ける。
     """
-    path = m.group("path")
+    raw = m.group("path")
+    length = _balanced_length(raw)
+    if length < len(raw):
+        # 閉じ括弧から後ろは本文に残す (行範囲もその後ろにあるので使わない)。
+        raw = raw[:length]
+        lines, first, last = "", None, None
+        end = m.start("path") + length
+    else:
+        lines = m.group(0)[m.end("path") - m.start():]
+        first, last = _lines(m.group("start"), m.group("end"))
+        end = m.end()
+    path = raw
     if is_windows_absolute(m.group(0)):
         # Windows のルートの下なら "\" は区切り。
         path = path.replace("\\", "/")
-    lines = m.group(0)[m.end("path") - m.start():]
     trailing = ""
     if not lines:
         path, trailing = _split_trailing(path)
     relative = inside(path)
     if relative is None:
         return None
-    return relative, relative + lines, trailing
+    return _AbsolutePath(m.start(), end, relative, relative + lines, trailing, first, last)
+
+
+def _balanced_length(path: str) -> int:
+    """path の先頭から、対応の取れない閉じ括弧の手前までの長さ。"""
+    stack: list[str] = []
+    for i, char in enumerate(path):
+        if char in "([":
+            stack.append(char)
+        elif char in _CLOSING:
+            if not stack or stack[-1] != _CLOSING[char]:
+                return i
+            stack.pop()
+    return len(path)
+
+
+def _markdown_url(url: str) -> str:
+    """Markdown のリンク先に置く URL。括弧はリンクの終わりと読まれないよう符号化する。"""
+    return url.replace("(", "%28").replace(")", "%29")
 
 
 def _split_trailing(path: str) -> tuple[str, str]:

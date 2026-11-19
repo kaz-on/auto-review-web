@@ -186,6 +186,69 @@ def test_ルートを_1_つだけ渡してもよい():
     assert linkify("/work/org/repo/a.py:3", ROOT, None) == "a.py:3"
 
 
+
+# --- 記号を含むパス -----------------------------------------------------------
+def test_括弧を含むディレクトリ名のパスもリンクにする():
+    """Next.js の "[id]" や "(group)" のようなディレクトリ名。"""
+    text = "- [P1] t — /work/org/repo/src/[abc]/(def)/ghi/jkl.py:3-4"
+
+    assert linkify(text, ROOTS, blob) == (
+        r"- [P1] t — [src/\[abc\]/(def)/ghi/jkl.py:3-4]"
+        "(https://host/blob/SHA/src/[abc]/%28def%29/ghi/jkl.py#3-4)"
+    )
+
+
+def test_括弧を含むパスもコードの中は相対パスに直すだけ():
+    assert linkify("`/work/org/repo/src/[abc]/(def)/a.py:3`", ROOTS, blob) == (
+        "`src/[abc]/(def)/a.py:3`"
+    )
+
+
+def test_パスの中のリンクの形をリンクとして扱わない():
+    assert linkify("/work/org/repo/src/[abc](def)/a.py:3", ROOTS, blob) == (
+        r"[src/\[abc\](def)/a.py:3](https://host/blob/SHA/src/[abc]%28def%29/a.py#3-3)"
+    )
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("(/work/org/repo/a.py)", "([a.py](https://host/blob/SHA/a.py))"),
+    ("(/work/org/repo/a.py:3)", "([a.py:3](https://host/blob/SHA/a.py#3-3))"),
+    ("(/work/org/repo/README.md.)", "([README.md](https://host/blob/SHA/README.md).)"),
+    ("[/work/org/repo/(def)/a.py]", "[[(def)/a.py](https://host/blob/SHA/%28def%29/a.py)]"),
+])
+def test_パスを囲む括弧はパスに含めない(text, expected):
+    assert linkify(text, ROOTS, blob) == expected
+
+
+def test_パスの中の_markdown_の記号はエスケープする():
+    assert linkify("/work/org/repo/pkg/__init__.py:1", ROOTS, None) == (
+        r"pkg/\_\_init\_\_.py:1"
+    )
+
+
+def test_括弧を含むリンク先も変換する():
+    assert linkify("[x](src/[abc]/(def)/a.py#L3)", ROOTS, blob) == (
+        "[x](https://host/blob/SHA/src/[abc]/%28def%29/a.py#3-3)"
+    )
+
+
+def test_表示文字列に角括弧を含むリンクも変換する():
+    assert linkify("[src/[abc]/a.py](src/[abc]/a.py#L3)", ROOTS, blob) == (
+        "[src/[abc]/a.py](https://host/blob/SHA/src/[abc]/a.py#3-3)"
+    )
+
+
+def test_山括弧で囲んだリンク先も変換する():
+    assert linkify("[x](</work/org/repo/src/(def)/a b.py#L3>)", ROOTS, blob) == (
+        "[x](https://host/blob/SHA/src/%28def%29/a b.py#3-3)"
+    )
+
+
+def test_変換しない山括弧のリンク先はそのまま残す():
+    link = "[x](<https://example.com/a b>)"
+
+    assert linkify(link, ROOTS, blob) == link
+
 # --- Windows で動かしたとき ---------------------------------------------------
 WIN_ROOT = Path(r"C:\work\org\repo")
 WIN_ROOTS = (WIN_ROOT, Path(r"C:\work\repo"))
