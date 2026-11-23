@@ -227,14 +227,10 @@ def test_絞り込み条件が無ければ_where_を付けない():
 def test_詳細ではヘッダ付きの本文を返す():
     review = _create(body="## 指摘", model="m", details="バナー")
 
-    detail = reviews.get_detail(review.id)
+    detail = reviews.get_detail(review)
 
     assert detail["review_text"] == "codex review (m, rev-0):\n\n## 指摘"
     assert detail["details"] == "バナー"
-
-
-def test_存在しないレビューの詳細は_none():
-    assert reviews.get_detail(999) is None
 
 
 def test_絞り込み用のリポジトリ名は重複せず並ぶ():

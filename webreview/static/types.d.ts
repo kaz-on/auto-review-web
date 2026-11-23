@@ -38,9 +38,11 @@ interface Job {
   has_result: boolean;
 }
 
-/** GET /api/reviews/<job_id>。結果があるジョブには本文が付く。 */
+/** GET /api/reviews/<job_id>。結果があるジョブには本文と依頼文が付く。 */
 interface JobDetail extends Job {
   review_text?: string;
+  /** 指摘をまとめた、エージェントに渡す依頼文 (handoff.handoff)。指摘が無ければ null。 */
+  handoff?: string | null;
 }
 
 /** GET /api/reviews */
@@ -116,4 +118,6 @@ interface SummaryDetail {
   id: number;
   review_text: string;
   details: string;
+  /** JobDetail.handoff と同じ。 */
+  handoff: string | null;
 }

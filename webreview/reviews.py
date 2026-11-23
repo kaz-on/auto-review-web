@@ -223,11 +223,8 @@ def list_summary(
     ]
 
 
-def get_detail(review_id: int) -> dict[str, Any] | None:
+def get_detail(review: Review) -> dict[str, Any]:
     """一覧から開かれたときに本文と詳細を返す。"""
-    review = get(review_id)
-    if review is None:
-        return None
     return {
         "id": review.id,
         "review_text": render_body(review),

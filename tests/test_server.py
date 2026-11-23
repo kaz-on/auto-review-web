@@ -273,6 +273,19 @@ def test_詳細ではレビュー本文を返す(client):
 
     assert data["has_result"] is True
     assert data["review_text"] == "codex review (m, rev-0):\n\n## 指摘"
+    assert data["handoff"] is None
+
+
+def test_詳細では指摘をまとめた依頼文を返す(client):
+    job_id = _post_review(client).get_json()["job"]["id"]
+    review = reviews.create(
+        owner="example-org", repo="my-repo", pr_number=1, body="- [P1] 誤り — a.py:3\n  説明。"
+    )
+    store.update(job_id, status=store.SUCCEEDED, review_id=review.id)
+
+    data = client.get(f"/api/reviews/{job_id}").get_json()
+
+    assert "## 1. [P1] 誤り\n\n場所: a.py:3\n\n説明。" in data["handoff"]
 
 
 def test_レビュー未生成なら本文は付かない(client):
@@ -464,6 +477,7 @@ def test_集計の詳細で本文を返す(client):
 
     assert data["review_text"] == "codex review (m, rev-0):\n\n## 指摘"
     assert data["details"] == "バナー"
+    assert data["handoff"] is None
 
 
 def test_存在しないレビューの詳細は_404(client):

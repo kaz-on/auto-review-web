@@ -569,10 +569,6 @@ def post_review(
     if review is None:
         raise ReviewError(f"レビューが見つかりません: id={review_id}")
 
-    # オーナーを 1 つに固定していた頃のレビューは、その頃の作業ツリーのパスで出ている。
-    roots = (
-        config.repo_work_path(pr.owner, pr.repo),
-        config.legacy_repo_work_path(pr.repo),
-    )
+    roots = config.review_roots(pr.owner, pr.repo)
     forge.get().post_review(pr.owner, pr.repo, pr.number, review, roots, progress)
     progress("投稿が完了しました。")

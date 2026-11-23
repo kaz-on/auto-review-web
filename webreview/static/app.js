@@ -67,6 +67,90 @@ function fmtTime(epoch) {
     `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// ---- エージェントに渡す依頼文 ----------------------------------------------
+// レビューの指摘をまとめて、手元の AI エージェントへ貼り付けるための依頼文をコピーさせる。
+// 文面はサーバ (handoff.py) が組み立てる。特定のエージェントに寄せた名前は付けない。
+
+/**
+ * クリップボードへ書き込む。navigator.clipboard は HTTPS か localhost でしか
+ * 使えないので、LAN 内から http で開いたときは選択してコピーする古い方法に頼る。
+ * @param {string} text
+ * @returns {Promise<void>}
+ */
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = el("textarea", { attrs: { readonly: "", "aria-hidden": "true" } });
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("コピーできませんでした。");
+  } finally {
+    area.remove();
+  }
+}
+
+const HANDOFF_LABEL = "エージェント用にコピー";
+
+/**
+ * レビューの指摘をまとめた依頼文をコピーするボタン。詳細を開かなくても押せるように、
+ * 文面は押された時点で取りに行く。取得を待つあいだにブラウザがコピーを許さなくなる
+ * ことがあるので、取れた文面は覚えておき、2 回目は待たずにコピーする。
+ * @param {() => Promise<string | null | undefined>} load
+ * @returns {HTMLButtonElement}
+ */
+function buildHandoffButton(load) {
+  const btn = el("button", {
+    class: "secondary",
+    text: HANDOFF_LABEL,
+    attrs: {
+      type: "button",
+      title: "レビューの指摘をまとめて、AI エージェントに渡す文面としてコピーします",
+    },
+  });
+  /** @type {string | null | undefined} */
+  let text;
+  /** @type {number | undefined} */
+  let timer;
+  /** @param {string} label */
+  const flash = (label) => {
+    clearTimeout(timer);
+    btn.textContent = label;
+    timer = setTimeout(() => { btn.textContent = HANDOFF_LABEL; }, 2500);
+  };
+  btn.addEventListener("click", async () => {
+    let fetched = false;
+    try {
+      if (text === undefined) {
+        btn.disabled = true;
+        text = (await load()) ?? null;
+        fetched = true;
+      }
+    } catch (err) {
+      flash("読み込みに失敗しました");
+      return;
+    } finally {
+      btn.disabled = false;
+    }
+    if (text === null) {
+      flash("指摘はありません");
+      return;
+    }
+    try {
+      await copyText(text);
+      flash("コピーしました ✓");
+    } catch (err) {
+      flash(fetched ? "もう一度押してください" : "コピーに失敗しました");
+    }
+  });
+  return btn;
+}
+
 // ---- タブ切り替え ----------------------------------------------------------
 const tabButtons =
   /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll(".tab-btn"));
@@ -430,8 +514,14 @@ function updateActions(card, job) {
     st = postStatus;
     r.postBtn = postBtn;
     r.postStatus = postStatus;
+    const handoffBtn = buildHandoffButton(async () => {
+      /** @type {JobDetail} */
+      const d = await fetchJSON(`/api/reviews/${job.id}`);
+      return d.handoff;
+    });
+
     r.actions.appendChild(el("div", {}, [resultDetails]));
-    r.actions.appendChild(postBtn);
+    r.actions.appendChild(el("div", { class: "action-row" }, [postBtn, handoffBtn]));
     r.actions.appendChild(postStatus);
     // resultDetails をアクション行の外(上)に置くとレイアウトが崩れるためまとめて格納
     r.actions.style.flexDirection = "column";
@@ -720,10 +810,18 @@ function buildSummaryDetails(entry) {
     el("summary", { text: "詳細情報" }), detailsPre,
   ]);
 
-  // 本文と詳細は同じエンドポイントから来る。どちらを先に開いても取得は 1 回で
-  // 済むように共有し、失敗したら次に開いたときに取り直す。
+  // 本文・詳細・依頼文は同じエンドポイントから来る。どれを先に使っても取得は 1 回で
+  // 済むように共有し、失敗したら次に使うときに取り直す。
   /** @type {Promise<SummaryDetail> | null} */
   let pending = null;
+  /** @returns {Promise<SummaryDetail>} */
+  function load() {
+    if (!pending) {
+      pending = fetchJSON(`/api/summary/${entry.id}`);
+      pending.catch(() => { pending = null; });
+    }
+    return pending;
+  }
 
   /**
    * @param {HTMLDetailsElement} box
@@ -736,11 +834,9 @@ function buildSummaryDetails(entry) {
       if (!box.open || loaded) return;
       loaded = true;
       try {
-        if (!pending) pending = fetchJSON(`/api/summary/${entry.id}`);
-        pre.textContent = pick(await pending);
+        pre.textContent = pick(await load());
       } catch (err) {
         loaded = false;
-        pending = null;
         pre.textContent = err.message;
       }
     });
@@ -749,7 +845,11 @@ function buildSummaryDetails(entry) {
   bindLoad(reviewDetails, reviewPre, (d) => d.review_text || "(空)");
   bindLoad(detailsBox, detailsPre, (d) => d.details || "(なし)");
 
-  return el("div", {}, [reviewDetails, detailsBox]);
+  const handoffBtn = buildHandoffButton(async () => (await load()).handoff);
+
+  return el("div", {}, [
+    el("div", { class: "action-row" }, [handoffBtn]), reviewDetails, detailsBox,
+  ]);
 }
 
 // ---- ポーリング開始 --------------------------------------------------------

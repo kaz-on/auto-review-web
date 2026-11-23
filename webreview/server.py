@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import config, db, export, forge, reviews, store
+from . import config, db, export, forge, handoff, reviews, store
 from .errors import ReviewError
 from .review import parse_pr_url
 from .store import SUCCEEDED
@@ -213,6 +213,7 @@ def create_app() -> Flask:
             review = reviews.get(job.review_id)
             if review is not None:
                 data["review_text"] = reviews.render_body(review)
+                data["handoff"] = handoff.handoff(review)
         return jsonify(data)
 
     @app.delete("/api/reviews/<job_id>")
@@ -261,10 +262,10 @@ def create_app() -> Flask:
 
     @app.get("/api/summary/<int:review_id>")
     def api_summary_detail(review_id: int):
-        detail = reviews.get_detail(review_id)
-        if detail is None:
+        review = reviews.get(review_id)
+        if review is None:
             return jsonify({"error": "レビューが見つかりません。"}), 404
-        return jsonify(detail)
+        return jsonify({**reviews.get_detail(review), "handoff": handoff.handoff(review)})
 
     # --- エクスポート ----------------------------------------------------
     # 集計はアプリの外で行う前提で、レビュー単位と指摘単位の CSV を出す。

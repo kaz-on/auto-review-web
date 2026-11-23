@@ -17,6 +17,7 @@ webreview/
   gitlab_api.py  GitLab REST API の薄いラッパ
   findings.py    レビュー本文から行コメントにできる指摘を取り出す
   links.py       投稿する本文のファイルの参照を blob へのリンクにする
+  handoff.py     指摘をまとめて AI エージェントに渡す依頼文にする（画面のコピーボタン用）
   review.py      レビューの実行と投稿（codex / git の駆動）
   store.py       ジョブ状態の管理
   reviews.py     レビュー結果の永続化・集計・PR タイトルキャッシュ

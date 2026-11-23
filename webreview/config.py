@@ -169,6 +169,14 @@ def legacy_repo_work_path(repo: str) -> Path:
     return WORK_PATH / repo
 
 
+def review_roots(owner: str, repo: str) -> tuple[Path, Path]:
+    """レビュー本文に出るパスの根元の候補 (findings.Item.resolve に渡す)。
+
+    オーナーを 1 つに固定していた頃のレビューは、その頃の作業ツリーのパスで出ている。
+    """
+    return repo_work_path(owner, repo), legacy_repo_work_path(repo)
+
+
 def repo_logs_path(owner: str, repo: str) -> Path:
     """リポジトリの codex 生ログの置き場所。"""
     return LOGS_PATH / owner / repo

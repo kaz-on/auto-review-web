@@ -88,10 +88,7 @@ def review_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[
 def finding_rows(repo: str | None = None, q: str | None = None) -> Iterator[list[Any]]:
     """指摘 1 件を 1 行にする。指摘の無いレビューは行を出さない。"""
     for row in _rows(repo, q):
-        roots = (
-            config.repo_work_path(row["owner"], row["repo"]),
-            config.legacy_repo_work_path(row["repo"]),
-        )
+        roots = config.review_roots(row["owner"], row["repo"])
         for item in findings.parse(row["body"]).items:
             # 投稿と同じくリポジトリからの相対パスにする。直せないものは codex が
             # 出したまま残す (指摘であることには変わりない)。

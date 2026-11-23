@@ -212,6 +212,9 @@ pre.code {
   margin: 0.5rem 0 0;
 }
 
+/* 投稿・コピーなどのボタンを横に並べる */
+.action-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
+
 .error-box {
   margin-top: 0.6rem;
   background: #fff0f0;
