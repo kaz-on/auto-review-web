@@ -37,6 +37,35 @@ function el(tag, opts = {}, children = []) {
   return node;
 }
 
+// 一覧は 2 秒ごとのポーリングで描き直す。内容が同じでも文字を入れ直したり要素を
+// 付け直したりすると、その中で選択していた範囲が外れてコピーできなくなるので、
+// 変わったところだけを書き換える。
+
+/**
+ * 文字が変わったときだけ書き換える。
+ * @param {HTMLElement} node
+ * @param {string} text
+ */
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
+/**
+ * 伸びていくログを書き換える。前の内容の続きなら増えたぶんだけ書き足し、
+ * それまでの行の選択を残す。
+ * @param {HTMLElement} node
+ * @param {string} text
+ */
+function setLog(node, text) {
+  const current = node.textContent || "";
+  if (current === text) return;
+  if (current && text.startsWith(current)) {
+    node.appendChild(document.createTextNode(text.slice(current.length)));
+  } else {
+    node.textContent = text;
+  }
+}
+
 /**
  * JSON API を叩く。レスポンスの型は呼び出し側で注釈する (types.d.ts を参照)。
  * @param {string} url
@@ -407,11 +436,14 @@ function updateCard(card, job) {
   const r = card.refs;
 
   // バッジ
-  r.badge.className = "badge " + job.status;
-  const spinning = job.status === "running" || job.status === "queued";
-  r.badge.textContent = "";
-  if (spinning) r.badge.appendChild(el("span", { class: "spinner" }));
-  r.badge.appendChild(document.createTextNode(STATUS_LABEL[job.status] || job.status));
+  if (r.badge.dataset.status !== job.status) {
+    r.badge.dataset.status = job.status;
+    r.badge.className = "badge " + job.status;
+    const spinning = job.status === "running" || job.status === "queued";
+    r.badge.textContent = "";
+    if (spinning) r.badge.appendChild(el("span", { class: "spinner" }));
+    r.badge.appendChild(document.createTextNode(STATUS_LABEL[job.status] || job.status));
+  }
 
   // 品質改善・自動投稿チップ / 削除ボタン
   r.quality.classList.toggle("hidden", !job.include_quality);
@@ -420,24 +452,29 @@ function updateCard(card, job) {
   r.delBtn.classList.toggle("hidden", !terminal);
 
   // タイトル (リンク)
-  r.title.textContent = "";
   // オーナーが違えば同じ名前のリポジトリもありうるので、オーナーから書く。
   const label = `${job.owner}/${job.repo} #${job.number}`
     + (job.pr_title ? ` — ${job.pr_title}` : "");
-  r.title.appendChild(el("a", {
-    href: job.url, text: label,
-    attrs: { target: "_blank", rel: "noopener" },
-  }));
+  const link = r.title.firstElementChild;
+  if (link instanceof HTMLAnchorElement && link.getAttribute("href") === job.url) {
+    setText(link, label);
+  } else {
+    r.title.textContent = "";
+    r.title.appendChild(el("a", {
+      text: label,
+      attrs: { href: job.url, target: "_blank", rel: "noopener" },
+    }));
+  }
 
   // タイムスタンプ
   const parts = [`投入: ${fmtTime(job.created_at)}`];
   if (job.started_at) parts.push(`開始: ${fmtTime(job.started_at)}`);
   if (job.finished_at) parts.push(`終了: ${fmtTime(job.finished_at)}`);
-  r.sub.textContent = parts.join(" / ");
+  setText(r.sub, parts.join(" / "));
 
   // 実行中の現在ステップ
   if (job.status === "running" && job.progress && job.progress.length) {
-    r.current.textContent = "現在: " + job.progress[job.progress.length - 1];
+    setText(r.current, "現在: " + job.progress[job.progress.length - 1]);
     r.current.classList.remove("hidden");
   } else {
     r.current.classList.add("hidden");
@@ -453,7 +490,7 @@ function updateCard(card, job) {
 
   // エラー
   if (job.status === "failed" && job.error) {
-    r.errorBox.textContent = job.error;
+    setText(r.errorBox, job.error);
     r.errorBox.classList.remove("hidden");
   } else {
     r.errorBox.classList.add("hidden");
@@ -462,9 +499,9 @@ function updateCard(card, job) {
   // 進捗ログ。実行中は一覧のポーリングで届く内容をそのまま反映し、終了後は
   // 開かれたときに取得した内容を保持する (再取得しない)。
   if (job.progress) {
-    r.progressPre.textContent = job.progress.join("\n");
+    setLog(r.progressPre, job.progress.join("\n"));
   } else if (!card.loadedProgress) {
-    r.progressPre.textContent = "開くと読み込みます...";
+    setText(r.progressPre, "開くと読み込みます...");
   }
   r.progressDetails.classList.toggle("hidden", !job.progress_count);
 
@@ -529,24 +566,25 @@ function updateActions(card, job) {
   }
 
   // 投稿状態
-  st.className = "post-status";
   if (job.posted) {
     btn.classList.add("hidden");
-    st.classList.add("ok");
-    st.textContent = "投稿済み ✓";
+    st.className = "post-status ok";
+    setText(st, "投稿済み ✓");
   } else if (job.posting) {
     btn.disabled = true;
-    btn.textContent = "投稿中...";
-    st.textContent = "";
+    setText(btn, "投稿中...");
+    st.className = "post-status";
+    setText(st, "");
   } else {
     btn.classList.remove("hidden");
     btn.disabled = false;
-    btn.textContent = "PR に投稿";
+    setText(btn, "PR に投稿");
     if (job.post_error) {
-      st.classList.add("err");
-      st.textContent = "投稿に失敗しました:\n" + job.post_error;
+      st.className = "post-status err";
+      setText(st, "投稿に失敗しました:\n" + job.post_error);
     } else {
-      st.textContent = "";
+      st.className = "post-status";
+      setText(st, "");
     }
   }
 }
@@ -588,18 +626,21 @@ function renderJobs(data) {
   const truncated = jobs.length < data.total;
   jobMore.classList.toggle("hidden", !truncated);
   jobMoreBtn.classList.toggle("hidden", data.limit < jobLimit);
-  jobRange.textContent = `${data.total} 件中 ${jobs.length} 件を表示`;
+  setText(jobRange, `${data.total} 件中 ${jobs.length} 件を表示`);
 
   // busy バナー
   if (data.busy) {
     busyBanner.classList.remove("hidden");
-    busyBanner.textContent = "現在レビューを実行中です。新しい投入はキューに追加されます。";
+    setText(busyBanner, "現在レビューを実行中です。新しい投入はキューに追加されます。");
   } else {
     busyBanner.classList.add("hidden");
   }
 
   /** @type {Set<string>} */
   const seen = new Set();
+  // 並びが変わったカードだけを動かす。付け直すと中の選択が外れる。
+  /** @type {Element | null} */
+  let prev = null;
   for (const job of jobs) {
     seen.add(job.id);
     let card = cards.get(job.id);
@@ -608,7 +649,10 @@ function renderJobs(data) {
       cards.set(job.id, card);
     }
     updateCard(card, job);
-    jobList.appendChild(card.root); // 既存要素の再 append は並べ替えとして機能
+    /** @type {Element | null} */
+    const expected = prev ? prev.nextElementSibling : jobList.firstElementChild;
+    if (card.root !== expected) jobList.insertBefore(card.root, expected);
+    prev = card.root;
   }
 
   // 消えたジョブを除去
