@@ -282,6 +282,18 @@ def cached_title(owner: str, repo: str, pr_number: int) -> str | None:
     return row["title"]
 
 
+def known_title(owner: str, repo: str, pr_number: int) -> str | None:
+    """キャッシュにあるタイトルを、失効していても返す。
+
+    画面の一覧や CSV と同じく、取り直すまでは古いタイトルでも無いよりよいものとして使う。
+    """
+    row = db.connect().execute(
+        "SELECT title FROM pr_titles WHERE owner = ? AND repo = ? AND pr_number = ?",
+        (owner, repo, pr_number),
+    ).fetchone()
+    return row["title"] if row is not None else None
+
+
 def put_title(owner: str, repo: str, pr_number: int, title: str) -> None:
     if not title:
         return

@@ -1,8 +1,8 @@
 """レビューの指摘を、AI エージェントに渡す依頼文にする。
 
 画面の「エージェント用にコピー」ボタンが使う。レビューの指摘をすべて 1 つの文章に
-まとめ、エージェントが手元のリポジトリで続きを調べられるだけの文脈 (PR・レビューした
-コミット・場所・説明) を載せる。どの指摘を渡すか、何をしてほしいか (相談・修正・調査)
+まとめ、エージェントが手元のリポジトリで続きを調べられるだけの文脈 (PR とそのタイトル・
+レビューしたコミット・場所・説明) を載せる。どの指摘を渡すか、何をしてほしいか (相談・修正・調査)
 は使う人が貼り付けたあとに編集する前提で、ここでは指示を書かない。特定のエージェントに
 依存する書き方もしない。
 
@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from . import config, findings, forge
+from . import config, findings, forge, reviews
 from .paths import Roots
 from .reviews import Review
 
@@ -27,6 +27,10 @@ def handoff(review: Review) -> str | None:
 
     roots = config.review_roots(review.owner, review.repo)
     facts = [f"- PR: {forge.get().pr_url(review.owner, review.repo, review.pr_number)}"]
+    # タイトルはキャッシュにあるときだけ載せる (取り直しは一覧の表示に任せる)。
+    title = reviews.known_title(review.owner, review.repo, review.pr_number)
+    if title:
+        facts.append(f"- タイトル: {title}")
     if review.head_commit:
         facts.append(f"- レビューしたコミット: {review.head_commit}")
 

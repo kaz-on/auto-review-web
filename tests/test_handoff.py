@@ -25,10 +25,12 @@ def test_指摘をまとめて場所と説明を載せる(temp_paths):
         f"- 閉じ忘れ — {root}/b.py:7\n- 位置の無い箇条書き\n",
         head_commit="abc123",
     )
+    reviews.put_title("example-org", "my-repo", 7, "合計の計算を直す")
 
     assert handoff.handoff(review) == (
         "プルリクエストの自動レビューで、次の指摘がありました。\n\n"
         "- PR: https://github.com/example-org/my-repo/pull/7\n"
+        "- タイトル: 合計の計算を直す\n"
         "- レビューしたコミット: abc123\n\n"
         "手元のコードがレビューしたコミットと異なる場合は、現在のコードで確かめてください。\n\n"
         "## 1. [P1] 合計を誤る\n\n"
@@ -37,6 +39,24 @@ def test_指摘をまとめて場所と説明を載せる(temp_paths):
         "## 2. 閉じ忘れ\n\n"
         "場所: b.py:7\n"
     )
+
+
+def test_失効したタイトルも載せる(monkeypatch):
+    review = _create("- 閉じ忘れ — b.py:7\n")
+    reviews.put_title("example-org", "my-repo", 7, "古いタイトル")
+    monkeypatch.setattr(reviews, "TITLE_TTL_SECONDS", -1)
+
+    text = handoff.handoff(review)
+
+    assert text is not None
+    assert "- タイトル: 古いタイトル\n" in text
+
+
+def test_タイトルが分からなければ省く():
+    text = handoff.handoff(_create("- 閉じ忘れ — b.py:7\n"))
+
+    assert text is not None
+    assert "タイトル" not in text
 
 
 def test_コミットが分からなければ触れない(temp_paths):
