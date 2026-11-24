@@ -197,6 +197,7 @@ def test_読み取った指摘は行コメントの形に直せる():
 
     finding = item.resolve(REPO)
 
+    assert finding is not None
     assert (finding.path, finding.start_line, finding.end_line) == ("store/orders.py", 57, 58)
     assert finding.title == item.title
 

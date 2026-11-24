@@ -16,6 +16,8 @@ from webreview import config, github_api, github_auth, review, reviews
 from webreview.errors import ReviewError
 from webreview.review import ParsedPR
 
+from conftest import get_review
+
 pytestmark = pytest.mark.usefixtures("temp_db")
 
 PR = ParsedPR(owner="example-org", repo="my-repo", number=7)
@@ -101,6 +103,7 @@ def test_レビューを最後まで実行して保存する(
     assert result.codex_version == "1.2.3"
     assert result.session_id == "0199-abcd"
     # err ログの先頭だけを残し、トランスクリプトは持ち込まない。
+    assert result.details is not None
     assert "git diff" not in result.details
     assert stub_git["pull"].base_ref == "main"
     assert any("rev-0" in line for line in lines)
@@ -121,7 +124,7 @@ def test_品質改善を含める指定はプロンプトとレビューに残�
     result = review.run_review(PR, include_quality=True)
 
     assert seen["include_quality"] is True
-    assert reviews.get(result.id).include_quality is True
+    assert get_review(result.id).include_quality is True
 
 
 def test_pr_のタイトルをキャッシュする(fake_codex, stub_git, stub_github):
@@ -133,7 +136,7 @@ def test_pr_のタイトルをキャッシュする(fake_codex, stub_git, stub_g
 def test_pr_の作成者と変更の規模をレビューに記録する(fake_codex, stub_git, stub_github):
     result = review.run_review(PR)
 
-    got = reviews.get(result.id)
+    got = get_review(result.id)
     assert got.pr_author == "alice"
     assert (got.pr_additions, got.pr_deletions, got.pr_changed_files) == (120, 30, 4)
 
@@ -145,7 +148,7 @@ def test_err_ログは_rev_付きの_gzip_で残る(fake_codex, stub_git, stub_g
 
     path = logs / PR.owner / PR.repo / "codex_review_pr7_err.log-0.gz"
     # 置き場所はレビュー登録後に結び付けるので、返り値ではなく DB を見る。
-    assert reviews.get(result.id).stderr_path == str(path)
+    assert get_review(result.id).stderr_path == str(path)
     assert "OpenAI Codex v1.2.3" in gzip.open(path, "rt").read()
     # 一時ファイルは残さない。
     assert [p.name for p in (logs / PR.owner / PR.repo).iterdir()] == [path.name]

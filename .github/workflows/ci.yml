@@ -29,3 +29,11 @@ jobs:
         with:
           node-version: "22"
       - run: npx -p typescript@5 tsc --noEmit
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      # pyrightconfig.json が依存を .venv から引くので、手元と同じく .venv に入れる。
+      - run: python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+      - run: .venv/bin/pyright

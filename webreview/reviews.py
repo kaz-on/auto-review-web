@@ -113,6 +113,8 @@ def create(
             ),
         )
         review_id = cur.lastrowid
+    # INSERT が成功していれば lastrowid は必ず入る (None は INSERT 以外の文のとき)。
+    assert review_id is not None
     review = get(review_id)
     assert review is not None
     return review

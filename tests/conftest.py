@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from webreview import config, db, forge, github_auth
+from webreview import config, db, forge, github_auth, reviews, store
 
 
 def _reset_db_connections() -> None:
@@ -107,3 +107,26 @@ class FakeProvider:
 @pytest.fixture
 def fake_provider():
     return FakeProvider("token-0")
+
+
+# --- 取得のヘルパー -----------------------------------------------------------
+# store.get などは見つからなければ None を返すが、テストの大半は「あるはず」の
+# ものを読む。None のまま属性を読んで落ちるより、その場で何が無いかを示して失敗させ、
+# 型検査 (pyright) にも None ではないことを伝える。
+def get_job(job_id: str, with_progress: bool = True) -> store.Job:
+    job = store.get(job_id, with_progress=with_progress)
+    assert job is not None, f"ジョブ {job_id} が見つかりません"
+    return job
+
+
+def update_job(job_id: str, **fields) -> store.Job:
+    job = store.update(job_id, **fields)
+    assert job is not None, f"ジョブ {job_id} が見つかりません"
+    return job
+
+
+def get_review(review_id: int | None) -> reviews.Review:
+    assert review_id is not None, "レビューが結び付いていません"
+    review = reviews.get(review_id)
+    assert review is not None, f"レビュー {review_id} が見つかりません"
+    return review

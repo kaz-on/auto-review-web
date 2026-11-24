@@ -13,6 +13,8 @@ import pytest
 
 from webreview import config, db, reviews, store
 
+from conftest import get_job, update_job
+
 pytestmark = pytest.mark.usefixtures("temp_db")
 
 
@@ -188,8 +190,8 @@ def test_詳細では終了済みのジョブの進捗も取れる():
     store.append_progress(job.id, "2 行目")
     store.update(job.id, status=store.SUCCEEDED)
 
-    assert store.get(job.id).progress == ["1 行目", "2 行目"]
-    assert store.get(job.id, with_progress=False).progress is None
+    assert get_job(job.id).progress == ["1 行目", "2 行目"]
+    assert get_job(job.id, with_progress=False).progress is None
 
 
 def test_進捗は追加順に並ぶ():
@@ -197,7 +199,7 @@ def test_進捗は追加順に並ぶ():
     for i in range(30):
         store.append_progress(job.id, f"行 {i}")
 
-    assert store.get(job.id).progress == [f"行 {i}" for i in range(30)]
+    assert get_job(job.id).progress == [f"行 {i}" for i in range(30)]
 
 
 def test_消えたジョブへの進捗追加は無視する():
@@ -225,7 +227,7 @@ def test_実行中かどうかを判定する():
 def test_更新した値が返る():
     job = _create()
 
-    updated = store.update(job.id, status=store.RUNNING, started_at=123.0)
+    updated = update_job(job.id, status=store.RUNNING, started_at=123.0)
 
     assert updated.status == store.RUNNING
     assert updated.started_at == 123.0
@@ -234,7 +236,7 @@ def test_更新した値が返る():
 def test_真偽値は_0_1_として保存され真偽値で返る():
     job = _create()
 
-    updated = store.update(job.id, posted=True, posting=False)
+    updated = update_job(job.id, posted=True, posting=False)
 
     assert updated.posted is True
     assert updated.posting is False
@@ -256,7 +258,7 @@ def test_列名に見せかけた_sql_も弾く():
 
 def test_更新するものが無ければ現在の値を返す():
     job = _create()
-    assert store.update(job.id).id == job.id
+    assert update_job(job.id).id == job.id
 
 
 def test_存在しないジョブの更新は_none():
@@ -303,7 +305,7 @@ _OLD = 1.0  # 1970 年。保持期間をどう取っても期限切れになる�
 
 def _finished(number: int = 1, status: str = store.SUCCEEDED, **fields) -> store.Job:
     job = _create(number=number)
-    return store.update(job.id, status=status, finished_at=_OLD, **fields)
+    return update_job(job.id, status=status, finished_at=_OLD, **fields)
 
 
 def test_投稿済みの古いジョブは消す():
@@ -394,12 +396,12 @@ def test_未完了のジョブは再起動時に失敗にする():
 
     assert store.recover_interrupted() == 2
 
-    assert store.get(queued.id).status == store.FAILED
-    assert "再起動" in store.get(queued.id).error
-    assert store.get(running.id).status == store.FAILED
-    assert store.get(running.id).finished_at is not None
+    assert get_job(queued.id).status == store.FAILED
+    assert "再起動" in (get_job(queued.id).error or "")
+    assert get_job(running.id).status == store.FAILED
+    assert get_job(running.id).finished_at is not None
     # 既に終わっていたジョブには触らない。
-    assert store.get(done.id).status == store.SUCCEEDED
+    assert get_job(done.id).status == store.SUCCEEDED
 
 
 def test_投稿中フラグは再起動で必ず落ちる():
@@ -408,7 +410,7 @@ def test_投稿中フラグは再起動で必ず落ちる():
 
     store.recover_interrupted()
 
-    assert store.get(job.id).posting is False
+    assert get_job(job.id).posting is False
 
 
 def test_終了時刻が既にあれば上書きしない():
@@ -417,7 +419,7 @@ def test_終了時刻が既にあれば上書きしない():
 
     store.recover_interrupted()
 
-    assert store.get(job.id).finished_at == 42.0
+    assert get_job(job.id).finished_at == 42.0
 
 
 # --- 並行アクセス -----------------------------------------------------------
@@ -440,4 +442,4 @@ def test_別スレッドからの書き込みも同じ_db_に届く():
         t.join()
 
     assert errors == []
-    assert len(store.get(job.id).progress) == 60
+    assert len(get_job(job.id).progress or []) == 60

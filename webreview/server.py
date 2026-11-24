@@ -239,7 +239,10 @@ def create_app() -> Flask:
 
         store.update(job_id, posting=True, post_error=None)
         worker.post_async(job_id)
-        return jsonify({"job": _job_public(store.get(job_id))})
+        job = store.get(job_id)
+        if job is None:  # 投稿を始めた直後に削除された
+            return jsonify({"error": "ジョブが見つかりません。"}), 404
+        return jsonify({"job": _job_public(job)})
 
     # --- 集計 ------------------------------------------------------------
     @app.get("/api/summary")

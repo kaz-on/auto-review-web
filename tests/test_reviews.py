@@ -13,6 +13,8 @@ import pytest
 from webreview import config, db, github_api, github_auth, reviews
 from webreview.errors import ReviewError
 
+from conftest import get_review
+
 pytestmark = pytest.mark.usefixtures("temp_db")
 
 
@@ -44,7 +46,7 @@ def test_保存した内容がそのまま読み出せる():
         pr_changed_files=1,
     )
 
-    got = reviews.get(review.id)
+    got = get_review(review.id)
 
     assert got.body == "## 指摘"
     assert got.include_quality is False
@@ -95,10 +97,10 @@ def test_err_ログの置き場所を後から結び付けられる(tmp_path):
     path = tmp_path / "err.log.gz"
 
     reviews.set_stderr_path(review.id, path)
-    assert reviews.get(review.id).stderr_path == str(path)
+    assert get_review(review.id).stderr_path == str(path)
 
     reviews.set_stderr_path(review.id, None)
-    assert reviews.get(review.id).stderr_path is None
+    assert get_review(review.id).stderr_path is None
 
 
 # --- 表示・投稿用の整形 -----------------------------------------------------
@@ -403,12 +405,12 @@ def test_期限を過ぎた_err_ログを消して痕跡を残す(tmp_path, monk
 
     assert not old_log.exists()
     # 行は残したまま、消したことが分かるようにする。
-    assert reviews.get(old.id).stderr_path is None
-    assert reviews.get(old.id).stderr_pruned_at is not None
-    assert reviews.get(old.id).body == "本文"
+    assert get_review(old.id).stderr_path is None
+    assert get_review(old.id).stderr_pruned_at is not None
+    assert get_review(old.id).body == "本文"
     # 期限内のぶんは触らない。
     assert new_log.exists()
-    assert reviews.get(new.id).stderr_path == str(new_log)
+    assert get_review(new.id).stderr_path == str(new_log)
 
 
 def test_保持日数が_0_なら削除しない(tmp_path, monkeypatch):
@@ -438,4 +440,4 @@ def test_実体が既に無くても記録は片付ける(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "STDERR_RETENTION_DAYS", 30)
 
     assert reviews.prune_stderr() == 1
-    assert reviews.get(review.id).stderr_path is None
+    assert get_review(review.id).stderr_path is None

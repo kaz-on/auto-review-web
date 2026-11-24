@@ -9,6 +9,8 @@ import pytest
 
 from webreview import config, db, reviews, server, store
 
+from conftest import get_job
+
 
 class FakeWorker:
     """ReviewWorker の代役。何が積まれたかだけを覚える。"""
@@ -71,7 +73,7 @@ def test_起動時に未完了のジョブを失敗にする(
 
     server.create_app()
 
-    assert store.get(job.id).status == store.FAILED
+    assert get_job(job.id).status == store.FAILED
 
 
 # --- 静的ファイル -----------------------------------------------------------

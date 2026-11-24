@@ -12,6 +12,8 @@ from webreview import reviews, store
 from webreview.errors import ReviewError
 from webreview.worker import ReviewWorker
 
+from conftest import get_job, get_review
+
 pytestmark = pytest.mark.usefixtures("temp_db")
 
 
@@ -50,12 +52,12 @@ def test_成功したジョブはレビューを参照する(worker, monkeypatch
 
     worker._process(job.id)
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert done.status == store.SUCCEEDED
     assert done.finished_at is not None
     assert done.started_at is not None
-    assert reviews.get(done.review_id).body == "## 指摘"
-    assert "レビュー中..." in done.progress
+    assert get_review(done.review_id).body == "## 指摘"
+    assert "レビュー中..." in (done.progress or [])
 
 
 @pytest.mark.parametrize("include_quality", [True, False])
@@ -69,7 +71,7 @@ def test_品質改善を含めるかはジョブの設定どおりに渡す(
     worker._process(job.id)
 
     assert seen["include_quality"] is include_quality
-    assert reviews.get(store.get(job.id).review_id).include_quality is include_quality
+    assert get_review(get_job(job.id).review_id).include_quality is include_quality
 
 
 def test_想定内のエラーは画面に出す文言で失敗させる(worker, monkeypatch):
@@ -81,7 +83,7 @@ def test_想定内のエラーは画面に出す文言で失敗させる(worker,
 
     worker._process(job.id)
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert done.status == store.FAILED
     assert done.error == "codex がインストールされていません。"
     assert done.review_id is None
@@ -100,8 +102,9 @@ def test_想定外の例外でもワーカーは止まらない(worker, monkeypa
     worker.start()
     worker._queue.join()
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert done.status == store.FAILED
+    assert done.error is not None
     assert "想定外のエラー" in done.error
     assert "RuntimeError" in done.error
 
@@ -125,7 +128,7 @@ def test_キューに積んだジョブが処理される(worker, monkeypatch):
     worker.enqueue(job.id)
     worker._queue.join()
 
-    assert store.get(job.id).status == store.SUCCEEDED
+    assert get_job(job.id).status == store.SUCCEEDED
 
 
 def test_start_を重ねて呼んでもスレッドは一つ(worker):
@@ -147,7 +150,7 @@ def test_自動投稿が有効ならそのまま投稿する(worker, monkeypatch
 
     worker._process(job.id)
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert posted == [done.review_id]
     assert done.posted is True
     assert done.posting is False
@@ -166,7 +169,7 @@ def test_自動投稿が無効なら投稿しない(worker, monkeypatch):
     worker._process(job.id)
 
     assert posted == []
-    assert store.get(job.id).posted is False
+    assert get_job(job.id).posted is False
 
 
 def test_投稿に失敗してもレビューの成功は保つ(worker, monkeypatch):
@@ -180,7 +183,7 @@ def test_投稿に失敗してもレビューの成功は保つ(worker, monkeypa
 
     worker._process(job.id)
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert done.status == store.SUCCEEDED
     assert done.posted is False
     assert done.posting is False
@@ -198,9 +201,9 @@ def test_投稿中の想定外の例外も投稿中フラグを落とす(worker,
 
     worker._process(job.id)
 
-    done = store.get(job.id)
+    done = get_job(job.id)
     assert done.posting is False
-    assert "想定外のエラー" in done.post_error
+    assert "想定外のエラー" in (done.post_error or "")
 
 
 def test_レビューを持たないジョブは投稿しない(worker, monkeypatch):
@@ -227,10 +230,10 @@ def test_投稿は別スレッドで走る(worker, monkeypatch):
 
     # スレッドの完了を待ってから確認する。
     for _ in range(500):
-        if store.get(job.id).posted:
+        if get_job(job.id).posted:
             break
         __import__("time").sleep(0.01)
-    assert store.get(job.id).posted is True
+    assert get_job(job.id).posted is True
 
 
 def test_再投稿は前回の失敗を消す(worker, monkeypatch):
@@ -242,4 +245,4 @@ def test_再投稿は前回の失敗を消す(worker, monkeypatch):
 
     worker._post(job.id)
 
-    assert store.get(job.id).post_error is None
+    assert get_job(job.id).post_error is None

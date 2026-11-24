@@ -10,6 +10,7 @@ import io
 import json
 import urllib.error
 import urllib.request
+from email.message import Message
 
 import pytest
 
@@ -20,18 +21,13 @@ from conftest import FakeProvider
 
 
 class FakeResponse(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-        return False
+    """urlopen の応答の代役。BytesIO はそのまま with に使え、抜けると close する。"""
 
 
 def _http_error(code: int, payload) -> urllib.error.HTTPError:
     body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     return urllib.error.HTTPError(
-        "https://api.github.com/x", code, "err", {}, io.BytesIO(body)
+        "https://api.github.com/x", code, "err", Message(), io.BytesIO(body)
     )
 
 

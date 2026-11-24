@@ -370,4 +370,6 @@ def test_provider_はオーナーごとに一つ(monkeypatch, tmp_path):
     b = github_auth.get_provider("org-b")
     assert b is not a
     # それぞれ自分のオーナーの installation を引く。
+    assert isinstance(a, github_auth.AppTokenProvider)
+    assert isinstance(b, github_auth.AppTokenProvider)
     assert (a._owner, b._owner) == ("org-a", "org-b")

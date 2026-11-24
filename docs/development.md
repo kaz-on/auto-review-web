@@ -32,7 +32,8 @@ Dockerfile            codex / アプリを含むイメージ定義
 docker-compose.yml    起動定義（volume・環境変数）
 secrets/              GitHub App の秘密鍵置き場（.gitignore 済み）
 .env.example          環境変数のテンプレート（docker compose / run.sh 共通）
-requirements-dev.txt  テスト用の追加依存
+requirements-dev.txt  テスト・型検査用の追加依存
+pyrightconfig.json    Python の型検査設定（Pylance も読む）
 tsconfig.json         フロントエンドの型検査設定（ビルドはしない）
 ```
 
@@ -46,6 +47,21 @@ tsconfig.json         フロントエンドの型検査設定（ビルドはし�
 GitHub API・git・codex はいずれも差し替えるので、ネットワークにも本物の `codex` にも触らない（`codex` は代役のスクリプトを起動して確かめる）。`git` が入っていれば remote の検証も実行され、無ければその 2 件だけ skip する。
 
 設定 (`config`) は import 時に環境変数から読む定数なので、テストでは `monkeypatch.setattr(config, ...)` で差し替える。`data/` は `tests/conftest.py` の `isolate_data_paths` が一時ディレクトリへ逃がすため、テストが実データを触ることはない。
+
+`store.get` / `reviews.get` / `store.update` は見つからなければ `None` を返す。テストで「あるはず」のものを読むときは、`tests/conftest.py` の `get_job` / `get_review` / `update_job` を使う（`None` ならその場で失敗し、型検査にも `None` でないことが伝わる）。`None` になることを確かめるテストでは元の関数をそのまま使う。
+
+## Python の型検査
+
+`webreview/` と `tests/` は Pyright（VS Code の Pylance と同じエンジン）で検査する。設定は `pyrightconfig.json` にあり、依存は `.venv` から解決する。
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pyright
+```
+
+PyPI の `pyright` は Node 製の本体を呼ぶラッパで、Node が無い環境では初回の実行時に取得する。
+
+Pylance も `pyrightconfig.json` を読むので、エディタ上の警告と CLI の結果は揃う。CI では pytest と同様にエラー 0 件を保つ。
 
 ## フロントエンドの型検査
 

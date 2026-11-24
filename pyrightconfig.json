@@ -1,0 +1,14 @@
+// Python (webreview / tests) の型検査の設定。
+//   .venv/bin/pyright
+// VS Code の Pylance もこのファイルを読むので、エディタと CLI で結果が揃う。
+{
+  "include": ["webreview", "tests"],
+  "exclude": ["**/__pycache__", "webreview/static"],
+  // Dockerfile の python:3.12-slim に合わせる。
+  "pythonVersion": "3.12",
+  // Flask などの依存はプロジェクトの .venv から解決する。
+  // CI のように .venv が無い環境では、そのとき動いている Python が使われる。
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard"
+}

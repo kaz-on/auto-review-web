@@ -11,6 +11,7 @@ import io
 import json
 import urllib.error
 import urllib.request
+from email.message import Message
 
 import pytest
 
@@ -245,12 +246,7 @@ def test_本文のパスと相対リンクをコミットの_blob_へのリン�
 
 # --- API ラッパ ---------------------------------------------------------------
 class _Response(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-        return False
+    """urlopen の応答の代役。BytesIO はそのまま with に使え、抜けると close する。"""
 
 
 @pytest.fixture
@@ -297,7 +293,7 @@ def test_コメントを投稿する(capture_requests):
 def test_http_エラーは本文のメッセージを添えて伝える(capture_requests):
     sent, responses = capture_requests
     responses.append(urllib.error.HTTPError(
-        "u", 404, "err", {}, io.BytesIO(b'{"message": "404 Not found"}')
+        "u", 404, "err", Message(), io.BytesIO(b'{"message": "404 Not found"}')
     ))
 
     with pytest.raises(gitlab_api.ApiError, match="404 Not found") as excinfo:
